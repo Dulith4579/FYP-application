@@ -22,10 +22,10 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
   ClinicalAnalysisResult? _analysisResult;
   String? _errorMessage;
 
-  // Design system constants
-  static const Color _primaryGreen = Color(0xFF1B5E20);   // Deep Forest Green
-  static const Color _bgColor = Color(0xFFF5F7F5);        // Soft slate background
-  static const Color _cardBorderColor = Color(0xFFC8E6C9);
+  // Design system constants (dynamic for dark mode)
+  Color get _primaryGreen => Theme.of(context).brightness == Brightness.dark ? const Color(0xFF81C784) : const Color(0xFF1B5E20);
+  Color get _bgColor => Theme.of(context).scaffoldBackgroundColor;
+  Color get _cardBorderColor => Theme.of(context).brightness == Brightness.dark ? const Color(0xFF2E7D32) : const Color(0xFFC8E6C9);
 
   @override
   void dispose() {
@@ -63,8 +63,8 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
           _analysisResult = result;
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Clinical notes analyzed successfully!'),
+          SnackBar(
+            content: const Text('Clinical notes analyzed successfully!'),
             backgroundColor: _primaryGreen,
           ),
         );
@@ -112,7 +112,7 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
     return Scaffold(
       backgroundColor: _bgColor,
       appBar: AppBar(
-        backgroundColor: _primaryGreen,
+        backgroundColor: Theme.of(context).brightness == Brightness.dark ? Theme.of(context).cardColor : _primaryGreen,
         foregroundColor: Colors.white,
         elevation: 0,
         title: const Text(
@@ -147,7 +147,7 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
                   fontSize: 12,
                   fontWeight: FontWeight.w900,
                   letterSpacing: 1.2,
-                  color: Color(0xFF37474F),
+                  color: Colors.grey,
                 ),
               ),
               const SizedBox(height: 12),
@@ -161,6 +161,7 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
   }
 
   Widget _buildFeatureOverviewCard() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -177,7 +178,7 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
               color: _primaryGreen.withOpacity(0.12),
               shape: BoxShape.circle,
             ),
-            child: const Icon(
+            child: Icon(
               Icons.psychology,
               color: _primaryGreen,
               size: 24,
@@ -188,7 +189,7 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Local Gemma 2 Summarization Engine',
                   style: TextStyle(
                     fontFamily: 'Outfit',
@@ -204,7 +205,7 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
                     fontFamily: 'Inter',
                     fontSize: 12,
                     height: 1.3,
-                    color: Colors.grey[700],
+                    color: isDark ? Colors.grey[400] : Colors.grey[700],
                   ),
                 ),
               ],
@@ -216,30 +217,31 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
   }
 
   Widget _buildInputCard() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withOpacity(isDark ? 0.2 : 0.04),
             blurRadius: 10,
             offset: const Offset(0, 4),
           )
         ],
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(color: isDark ? Colors.grey[800]! : Colors.grey[200]!),
       ),
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
+          Text(
             'Raw Medical History Input',
             style: TextStyle(
               fontFamily: 'Outfit',
               fontSize: 16,
               fontWeight: FontWeight.bold,
-              color: Colors.black87,
+              color: isDark ? Colors.white70 : Colors.black87,
             ),
           ),
           const SizedBox(height: 4),
@@ -248,7 +250,7 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
             style: TextStyle(
               fontFamily: 'Inter',
               fontSize: 12,
-              color: Colors.grey[600],
+              color: isDark ? Colors.grey[400] : Colors.grey[600],
             ),
           ),
           const SizedBox(height: 16),
@@ -259,22 +261,22 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
             maxLines: 6,
             minLines: 3,
             maxLength: 800,
-            style: const TextStyle(
+            style: TextStyle(
               fontFamily: 'Inter',
               fontSize: 14,
-              color: Colors.black87,
+              color: isDark ? Colors.white70 : Colors.black87,
             ),
             decoration: InputDecoration(
               hintText: 'e.g., Pt c/o fever since 3 days, cough, chest tightness. Rx: Amoxicillin 500mg TDS x 5d, Paracetamol 1g QDS PRN.',
               hintStyle: TextStyle(
-                color: Colors.grey[400],
+                color: isDark ? Colors.grey[600] : Colors.grey[400],
                 fontSize: 13,
                 fontStyle: FontStyle.italic,
               ),
               labelText: 'Messy Medical History / Notes',
-              labelStyle: const TextStyle(
+              labelStyle: TextStyle(
                 fontFamily: 'Inter',
-                color: Colors.black54,
+                color: isDark ? Colors.white70 : Colors.black54,
                 fontSize: 14,
               ),
               alignLabelWithHint: true,
@@ -284,18 +286,18 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
               ),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey[300]!),
+                borderSide: BorderSide(color: isDark ? Colors.grey[700]! : Colors.grey[300]!),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey[300]!),
+                borderSide: BorderSide(color: isDark ? Colors.grey[700]! : Colors.grey[300]!),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: _primaryGreen, width: 1.8),
+                borderSide: BorderSide(color: _primaryGreen, width: 1.8),
               ),
               filled: true,
-              fillColor: const Color(0xFFFAFAFA),
+              fillColor: isDark ? Colors.grey[900] : const Color(0xFFFAFAFA),
             ),
           ),
           const SizedBox(height: 16),
@@ -338,23 +340,24 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
   }
 
   Widget _buildOutputSection() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     if (_isLoading) {
       return Card(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: Colors.grey[200]!),
+          side: BorderSide(color: isDark ? Colors.grey[800]! : Colors.grey[200]!),
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
           child: Column(
             children: [
-              const CircularProgressIndicator(
+              CircularProgressIndicator(
                 valueColor: AlwaysStoppedAnimation<Color>(_primaryGreen),
               ),
               const SizedBox(height: 20),
-              const Text(
+              Text(
                 'Generating Trilingual Summary...',
                 style: TextStyle(
                   fontFamily: 'Outfit',
@@ -370,7 +373,7 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
                 style: TextStyle(
                   fontFamily: 'Inter',
                   fontSize: 12,
-                  color: Colors.grey[600],
+                  color: isDark ? Colors.grey[400] : Colors.grey[600],
                 ),
               ),
             ],
@@ -381,11 +384,11 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
 
     if (_errorMessage != null) {
       return Card(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: Colors.red[200]!, width: 1.5),
+          side: BorderSide(color: isDark ? Colors.red[800]! : Colors.red[200]!, width: 1.5),
         ),
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -396,14 +399,14 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
                 children: [
                   Icon(Icons.wifi_off_rounded, color: Colors.red[800], size: 28),
                   const SizedBox(width: 12),
-                  const Expanded(
+                  Expanded(
                     child: Text(
                       'Ollama Connection Offline',
                       style: TextStyle(
                         fontFamily: 'Outfit',
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
-                        color: Colors.black87,
+                        color: isDark ? Colors.white70 : Colors.black87,
                       ),
                     ),
                   ),
@@ -416,7 +419,7 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
                   fontFamily: 'Inter',
                   fontSize: 13,
                   fontWeight: FontWeight.bold,
-                  color: Colors.grey[800],
+                  color: isDark ? Colors.grey[300] : Colors.grey[800],
                 ),
               ),
               const SizedBox(height: 8),
@@ -427,35 +430,35 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
                   children: [
                     Text(
                       '• Ensure Ollama is running on your host machine.',
-                      style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: Colors.grey[700]),
+                      style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: isDark ? Colors.grey[400] : Colors.grey[700]),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       '• Verify model is pre-installed: "ollama pull gemma2:2b"',
-                      style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: Colors.grey[700]),
+                      style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: isDark ? Colors.grey[400] : Colors.grey[700]),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       '• Verify the host is listening on port 11434.',
-                      style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: Colors.grey[700]),
+                      style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: isDark ? Colors.grey[400] : Colors.grey[700]),
                     ),
                     if (kIsWeb) ...[
                       const SizedBox(height: 6),
                       Text(
                         '• CORS Policy: Web browsers block local API requests unless Ollama is started with CORS allowed. Set OLLAMA_ORIGINS in your terminal:',
-                        style: TextStyle(fontFamily: 'Inter', fontSize: 12, fontWeight: FontWeight.bold, color: Colors.amber[900]),
+                        style: TextStyle(fontFamily: 'Inter', fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.amber[300] : Colors.amber[900]),
                       ),
                       const SizedBox(height: 4),
                       Container(
                         padding: const EdgeInsets.all(8),
                         width: double.infinity,
                         decoration: BoxDecoration(
-                          color: Colors.grey[100],
+                          color: isDark ? Colors.grey[900] : Colors.grey[100],
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
                           'Windows PowerShell:\n\$env:OLLAMA_ORIGINS="*"\nollama serve\n\nCMD:\nset OLLAMA_ORIGINS=*\nollama serve',
-                          style: const TextStyle(fontFamily: 'Courier', fontSize: 10.5, color: Colors.black87),
+                          style: TextStyle(fontFamily: 'Courier', fontSize: 10.5, color: isDark ? Colors.white70 : Colors.black87),
                         ),
                       ),
                     ],
@@ -466,15 +469,15 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.grey[100],
+                  color: isDark ? Colors.grey[900] : Colors.grey[100],
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
                   'Details: $_errorMessage',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontFamily: 'Courier',
                     fontSize: 11,
-                    color: Colors.black54,
+                    color: isDark ? Colors.white70 : Colors.black54,
                   ),
                 ),
               ),
@@ -497,11 +500,11 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
 
     if (_analysisResult == null) {
       return Card(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: Colors.grey[200]!),
+          side: BorderSide(color: isDark ? Colors.grey[800]! : Colors.grey[200]!),
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
@@ -513,13 +516,13 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
                 color: _primaryGreen.withOpacity(0.2),
               ),
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'Awaiting Clinical Input',
                 style: TextStyle(
                   fontFamily: 'Outfit',
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
-                  color: Colors.black87,
+                  color: isDark ? Colors.white70 : Colors.black87,
                 ),
               ),
               const SizedBox(height: 6),
@@ -529,7 +532,7 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
                 style: TextStyle(
                   fontFamily: 'Inter',
                   fontSize: 12,
-                  color: Colors.grey[500],
+                  color: isDark ? Colors.grey[400] : Colors.grey[500],
                 ),
               ),
             ],
@@ -555,7 +558,7 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
         _buildResultCard(
           title: '2. Active Prescriptions',
           icon: Icons.medication_rounded,
-          color: Colors.teal[700]!,
+          color: isDark ? Colors.teal[300]! : Colors.teal[700]!,
           content: result.activePrescriptions,
         ),
         const SizedBox(height: 16),
@@ -564,7 +567,7 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
         _buildResultCard(
           title: '3. Plain-Language Summary & Translations',
           icon: Icons.g_translate_rounded,
-          color: Colors.indigo[800]!,
+          color: isDark ? Colors.indigo[300]! : Colors.indigo[800]!,
           content: result.plainSummaryTranslations,
         ),
       ],
@@ -577,13 +580,14 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
     required Color color,
     required String content,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.02),
+            color: Colors.black.withOpacity(isDark ? 0.2 : 0.02),
             blurRadius: 8,
             offset: const Offset(0, 3),
           )
@@ -622,11 +626,11 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
               padding: const EdgeInsets.all(16),
               child: Text(
                 content,
-                style: const TextStyle(
+                style: TextStyle(
                   fontFamily: 'Inter',
                   fontSize: 13.5,
                   height: 1.45,
-                  color: Colors.black87,
+                  color: isDark ? Colors.white70 : Colors.black87,
                 ),
               ),
             ),
