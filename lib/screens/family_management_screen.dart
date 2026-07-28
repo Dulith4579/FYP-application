@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import '../services/firebase_phr_service.dart';
+import '../services/auth_service.dart';
+import 'main_navigation_wrapper.dart';
 
 /// Screen allowing users to manage family profiles and dependent accounts.
 /// 
@@ -21,11 +23,11 @@ class FamilyManagementScreen extends StatefulWidget {
 }
 
 class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
-  // Clinical Green Palette
-  static const Color _primaryGreen = Color(0xFF1B5E20);   // Deep Forest Green
-  static const Color _accentGreen = Color(0xFF4CAF50);    // Mint Green
-  static const Color _bgColor = Color(0xFFF5F7F5);        // Clean Light Slate/Grey
-  static const Color _cardBorderColor = Color(0xFFC8E6C9);
+  // Clinical Green Palette (dynamic getters for Dark Mode compatibility)
+  Color get _primaryGreen => Theme.of(context).brightness == Brightness.dark ? const Color(0xFF81C784) : const Color(0xFF1B5E20);
+  Color get _accentGreen => const Color(0xFF4CAF50);
+  Color get _bgColor => Theme.of(context).scaffoldBackgroundColor;
+  Color get _cardBorderColor => Theme.of(context).brightness == Brightness.dark ? const Color(0xFF2E7D32) : const Color(0xFFC8E6C9);
 
   // Local state list for demo mode fallbacks
   final List<Map<String, String>> _localDependents = [
@@ -57,8 +59,8 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
           onSuccess: () {
             Navigator.pop(context);
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Family dependent added successfully.'),
+              SnackBar(
+                content: const Text('Family dependent added successfully.'),
                 backgroundColor: _primaryGreen,
               ),
             );
@@ -73,7 +75,7 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
     return Scaffold(
       backgroundColor: _bgColor,
       appBar: AppBar(
-        backgroundColor: _primaryGreen,
+        backgroundColor: Theme.of(context).brightness == Brightness.dark ? Theme.of(context).cardColor : _primaryGreen,
         foregroundColor: Colors.white,
         elevation: 0,
         title: const Text(
@@ -91,7 +93,7 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
             // Informational Header Card with high contrast
             Container(
               padding: const EdgeInsets.all(20),
-              color: _primaryGreen,
+              color: Theme.of(context).brightness == Brightness.dark ? Theme.of(context).cardColor : _primaryGreen,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -127,10 +129,11 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
                       itemCount: _localDependents.length,
                       itemBuilder: (context, index) {
                         final data = _localDependents[index];
-                        final String name = data['name'] ?? 'Name Unavailable';
                         final String relationship = data['relationship'] ?? 'Dependent';
+                        final String id = 'dep_${relationship.toLowerCase()}';
+                        final String name = data['name'] ?? 'Name Unavailable';
                         final String age = data['age'] ?? 'N/A';
-                        return _buildDependentCard(name, relationship, age);
+                        return _buildDependentCard(id, name, relationship, age);
                       },
                     )
                   : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
@@ -150,11 +153,13 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
                           padding: const EdgeInsets.all(16),
                           itemCount: docs.length,
                           itemBuilder: (context, index) {
-                            final data = docs[index].data();
+                            final doc = docs[index];
+                            final data = doc.data();
+                            final String id = doc.id;
                             final String name = data['name'] ?? 'Name Unavailable';
                             final String relationship = data['relationship'] ?? 'Dependent';
                             final String age = data['age'] ?? 'N/A';
-                            return _buildDependentCard(name, relationship, age);
+                            return _buildDependentCard(id, name, relationship, age);
                           },
                         );
                       },
@@ -181,15 +186,16 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
     );
   }
 
-  Widget _buildDependentCard(String name, String relationship, String age) {
+  Widget _buildDependentCard(String dependentId, String name, String relationship, String age) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Card(
       elevation: 0,
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: _cardBorderColor, width: 1),
+        side: BorderSide(color: _cardBorderColor, width: 1),
       ),
-      color: Colors.white,
+      color: Theme.of(context).cardColor,
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         leading: CircleAvatar(
@@ -203,11 +209,11 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
         ),
         title: Text(
           name,
-          style: const TextStyle(
+          style: TextStyle(
             fontFamily: 'Inter',
             fontSize: 16,
             fontWeight: FontWeight.bold,
-            color: Colors.black87,
+            color: isDark ? Colors.white70 : Colors.black87,
           ),
         ),
         subtitle: Padding(
@@ -219,7 +225,7 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
                 style: TextStyle(
                   fontFamily: 'Inter',
                   fontSize: 13,
-                  color: Colors.grey[600],
+                  color: isDark ? Colors.grey[400] : Colors.grey[600],
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -227,8 +233,8 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
               Container(
                 width: 4,
                 height: 4,
-                decoration: const BoxDecoration(
-                  color: Colors.grey,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.grey[600] : Colors.grey,
                   shape: BoxShape.circle,
                 ),
               ),
@@ -238,33 +244,71 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
                 style: TextStyle(
                   fontFamily: 'Inter',
                   fontSize: 13,
-                  color: Colors.grey[600],
+                  color: isDark ? Colors.grey[400] : Colors.grey[600],
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ],
           ),
         ),
-        trailing: const Icon(
+        trailing: Icon(
           Icons.arrow_forward_ios_rounded,
           size: 16,
           color: _primaryGreen,
         ),
         onTap: () {
           HapticFeedback.selectionClick();
+          _confirmActiveProfileSwitch(name, dependentId);
         },
       ),
     );
   }
 
+  void _confirmActiveProfileSwitch(String name, String dependentId) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Switch Active Profile', style: TextStyle(fontFamily: 'Outfit', fontWeight: FontWeight.bold)),
+        content: Text('Would you like to switch the active dashboard profile context to $name? This will load their timeline history and permit diagnostic session authorizations on their behalf.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(fontFamily: 'Inter')),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              AuthService.instance.updateActivePatient(dependentId, name, true);
+              MainNavigationWrapper.activeTabNotifier.value = 0; // Go to Home Dashboard tab
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Switched active profile context to $name.'),
+                  backgroundColor: _primaryGreen,
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _primaryGreen,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Switch Profile', style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildEmptyState() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.people_outline_rounded, size: 64, color: Colors.grey[400]),
+            Icon(Icons.people_outline_rounded, size: 64, color: isDark ? Colors.grey[600] : Colors.grey[400]),
             const SizedBox(height: 16),
             Text(
               'No Dependents Linked',
@@ -272,7 +316,7 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
                 fontFamily: 'Outfit',
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: Colors.grey[700],
+                color: isDark ? Colors.grey[300] : Colors.grey[700],
               ),
             ),
             const SizedBox(height: 8),
@@ -282,7 +326,7 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
               style: TextStyle(
                 fontFamily: 'Inter',
                 fontSize: 13,
-                color: Colors.grey[500],
+                color: isDark ? Colors.grey[400] : Colors.grey[500],
               ),
             ),
           ],
@@ -318,8 +362,8 @@ class _AddDependentFormSheetState extends State<AddDependentFormSheet> {
   String _selectedRelationship = 'Child';
   bool _isSaving = false;
 
-  static const Color _primaryGreen = Color(0xFF1B5E20);
-  static const Color _bgColor = Color(0xFFF5F7F5);
+  Color get _primaryGreen => Theme.of(context).brightness == Brightness.dark ? const Color(0xFF81C784) : const Color(0xFF1B5E20);
+
 
   @override
   void dispose() {
@@ -374,9 +418,9 @@ class _AddDependentFormSheetState extends State<AddDependentFormSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       padding: const EdgeInsets.all(24),
       child: Form(
@@ -385,7 +429,7 @@ class _AddDependentFormSheetState extends State<AddDependentFormSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
+            Text(
               'Add Family Profile',
               style: TextStyle(
                 fontFamily: 'Outfit',
@@ -405,7 +449,7 @@ class _AddDependentFormSheetState extends State<AddDependentFormSheet> {
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: _primaryGreen, width: 2),
+                  borderSide: BorderSide(color: _primaryGreen, width: 2),
                 ),
                 prefixIcon: const Icon(Icons.person),
               ),
@@ -431,7 +475,7 @@ class _AddDependentFormSheetState extends State<AddDependentFormSheet> {
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: _primaryGreen, width: 2),
+                        borderSide: BorderSide(color: _primaryGreen, width: 2),
                       ),
                     ),
                     items: const [
@@ -463,7 +507,7 @@ class _AddDependentFormSheetState extends State<AddDependentFormSheet> {
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: _primaryGreen, width: 2),
+                        borderSide: BorderSide(color: _primaryGreen, width: 2),
                       ),
                     ),
                     validator: (val) {

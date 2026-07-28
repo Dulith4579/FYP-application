@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 
 /// Screen allowing patients to scan and upload clinical documents
 /// (e.g. physical prescriptions, external lab test reports, vaccine records).
@@ -41,11 +42,11 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
     },
   ];
 
-  // Colors mapping the Clinical Green theme
-  static const Color _primaryGreen = Color(0xFF1B5E20);   // Deep Forest Green
-  static const Color _accentGreen = Color(0xFF4CAF50);    // Mint Green
-  static const Color _bgColor = Color(0xFFF5F7F5);        // Clean Light Slate/Grey
-  static const Color _cardBorderColor = Color(0xFFC8E6C9);
+  // Colors mapping the Clinical Green theme (dynamic for dark mode)
+  Color get _primaryGreen => Theme.of(context).brightness == Brightness.dark ? const Color(0xFF81C784) : const Color(0xFF1B5E20);
+  Color get _accentGreen => const Color(0xFF4CAF50);
+  Color get _bgColor => Theme.of(context).scaffoldBackgroundColor;
+  Color get _cardBorderColor => Theme.of(context).brightness == Brightness.dark ? const Color(0xFF2E7D32) : const Color(0xFFC8E6C9);
 
   @override
   void dispose() {
@@ -54,25 +55,57 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
     super.dispose();
   }
 
-  /// Simulates picking a file from the device storage.
-  Future<void> _simulateFilePicker() async {
+  /// Triggers a native file picker dialog on device or web.
+  Future<void> _pickFileFromDevice() async {
     setState(() {
       _isSelectingFile = true;
       _simulatedFileName = null;
     });
     await HapticFeedback.selectionClick();
-    
-    // Simulate search latency
-    await Future.delayed(const Duration(milliseconds: 800));
 
-    setState(() {
-      _isSelectingFile = false;
-      _simulatedFileName = 'lab_report_sri_jayewardenepura.pdf';
-      _simulatedFileSize = '2.4 MB';
-      // Auto fill title controller for a better user experience
-      _titleController.text = 'SJGH Serum Creatinine Test';
-      _selectedCategory = 'Lab Report';
-    });
+    try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png'],
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+        final double sizeInMb = file.size / (1024 * 1024);
+        setState(() {
+          _simulatedFileName = file.name;
+          _simulatedFileSize = '${sizeInMb.toStringAsFixed(2)} MB';
+          
+          // Clean base name for the title field
+          final dotIndex = file.name.lastIndexOf('.');
+          final baseName = dotIndex != -1 ? file.name.substring(0, dotIndex) : file.name;
+          _titleController.text = baseName.replaceAll('_', ' ').replaceAll('-', ' ');
+          
+          final extension = file.extension?.toLowerCase();
+          if (extension == 'pdf') {
+            _selectedCategory = 'Lab Report';
+          } else {
+            _selectedCategory = 'Prescription';
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Error picking file: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to open file picker: $e'),
+            backgroundColor: Colors.red[850],
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSelectingFile = false;
+        });
+      }
+    }
   }
 
   /// Simulates uploading the selected file with progress updates.
@@ -121,8 +154,8 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Document encrypted and synced to cloud repository.'),
+        SnackBar(
+          content: const Text('Document encrypted and synced to cloud repository.'),
           backgroundColor: _primaryGreen,
         ),
       );
@@ -134,7 +167,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
     return Scaffold(
       backgroundColor: _bgColor,
       appBar: AppBar(
-        backgroundColor: _primaryGreen,
+        backgroundColor: Theme.of(context).brightness == Brightness.dark ? Theme.of(context).cardColor : _primaryGreen,
         foregroundColor: Colors.white,
         elevation: 0,
         title: const Text(
@@ -172,7 +205,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: _primaryGreen, width: 2),
+                          borderSide: BorderSide(color: _primaryGreen, width: 2),
                         ),
                         prefixIcon: const Icon(Icons.title_rounded),
                       ),
@@ -192,7 +225,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
                               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: const BorderSide(color: _primaryGreen, width: 2),
+                                borderSide: BorderSide(color: _primaryGreen, width: 2),
                               ),
                             ),
                             items: const [
@@ -222,7 +255,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: _primaryGreen, width: 2),
+                          borderSide: BorderSide(color: _primaryGreen, width: 2),
                         ),
                         prefixIcon: const Padding(
                           padding: EdgeInsets.only(bottom: 20),
@@ -245,7 +278,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
                       Text(
                         'Encrypting and uploading: ${(double.parse((_uploadProgress * 100).toStringAsFixed(0)))}%',
                         textAlign: TextAlign.center,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontFamily: 'Inter',
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
@@ -295,7 +328,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: _primaryGreen,
+        color: Theme.of(context).brightness == Brightness.dark ? Theme.of(context).cardColor : _primaryGreen,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Column(
@@ -332,25 +365,26 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
   }
 
   Widget _buildPickerArea() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return GestureDetector(
-      onTap: _isUploading || _isSelectingFile ? null : _simulateFilePicker,
+      onTap: _isUploading || _isSelectingFile ? null : _pickFileFromDevice,
       child: Container(
         height: 160,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: _accentGreen, width: 2, style: BorderStyle.solid),
         ),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: _isSelectingFile
-              ? const Center(
+              ? Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(_primaryGreen)),
-                      SizedBox(height: 12),
-                      Text('Accessing device files...', style: TextStyle(fontFamily: 'Inter', color: Colors.grey)),
+                      const SizedBox(height: 12),
+                      const Text('Accessing device files...', style: TextStyle(fontFamily: 'Inter', color: Colors.grey)),
                     ],
                   ),
                 )
@@ -358,45 +392,45 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
                   ? Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.insert_drive_file_rounded, color: _primaryGreen, size: 48),
+                        Icon(Icons.insert_drive_file_rounded, color: _primaryGreen, size: 48),
                         const SizedBox(height: 8),
                         Text(
                           _simulatedFileName!,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontFamily: 'Inter',
                             fontWeight: FontWeight.bold,
                             fontSize: 14,
-                            color: Colors.black87,
+                            color: isDark ? Colors.white70 : Colors.black87,
                           ),
                         ),
                         const SizedBox(height: 4),
                         Text(
                           _simulatedFileSize!,
-                          style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: Colors.grey[600]),
+                          style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: isDark ? Colors.grey[400] : Colors.grey[600]),
                         ),
                       ],
                     )
                   : Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.camera_alt_rounded, color: Colors.grey[400], size: 40),
+                        Icon(Icons.camera_alt_rounded, color: isDark ? Colors.grey[600] : Colors.grey[400], size: 40),
                         const SizedBox(height: 12),
-                        const Text(
+                        Text(
                           'Scan Prescriptions / Select Files',
                           style: TextStyle(
                             fontFamily: 'Inter',
                             fontWeight: FontWeight.bold,
                             fontSize: 15,
-                            color: Colors.black87,
+                            color: isDark ? Colors.white70 : Colors.black87,
                           ),
                         ),
                         const SizedBox(height: 4),
                         Text(
                           'Supports PDF, PNG, JPG files up to 10MB',
-                          style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: Colors.grey[500]),
+                          style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: isDark ? Colors.grey[400] : Colors.grey[500]),
                         ),
                       ],
                     )),
@@ -406,6 +440,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
   }
 
   Widget _buildHistorySection() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -416,7 +451,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
             fontSize: 11,
             fontWeight: FontWeight.w900,
             letterSpacing: 1.2,
-            color: Colors.grey[700],
+            color: isDark ? Colors.grey[400] : Colors.grey[700],
           ),
         ),
         const SizedBox(height: 12),
@@ -437,9 +472,9 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
               margin: const EdgeInsets.only(bottom: 12),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
-                side: const BorderSide(color: _cardBorderColor, width: 1),
+                side: BorderSide(color: _cardBorderColor, width: 1),
               ),
-              color: Colors.white,
+              color: Theme.of(context).cardColor,
               child: ListTile(
                 contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 leading: Container(
@@ -448,15 +483,15 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
                     color: _primaryGreen.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.lock_rounded, color: _primaryGreen, size: 20),
+                  child: Icon(Icons.lock_rounded, color: _primaryGreen, size: 20),
                 ),
                 title: Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontFamily: 'Inter',
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
-                    color: Colors.black87,
+                    color: isDark ? Colors.white70 : Colors.black87,
                   ),
                 ),
                 subtitle: Padding(
@@ -466,14 +501,14 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
                     children: [
                       Text(
                         'Category: $category | Name: $fileName',
-                        style: TextStyle(fontFamily: 'Inter', fontSize: 11, color: Colors.grey[600]),
+                        style: TextStyle(fontFamily: 'Inter', fontSize: 11, color: isDark ? Colors.grey[400] : Colors.grey[600]),
                       ),
                       const SizedBox(height: 6),
                       Row(
                         children: [
-                          const Icon(Icons.gpp_good_rounded, color: _accentGreen, size: 12),
+                          Icon(Icons.gpp_good_rounded, color: _accentGreen, size: 12),
                           const SizedBox(width: 4),
-                          const Text(
+                          Text(
                             'Encrypted and Synced',
                             style: TextStyle(
                               fontFamily: 'Inter',
@@ -485,7 +520,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
                           const SizedBox(width: 12),
                           Text(
                             dateStr,
-                            style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: Colors.grey[500]),
+                            style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: isDark ? Colors.grey[400] : Colors.grey[500]),
                           ),
                         ],
                       ),
@@ -493,7 +528,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
                   ),
                 ),
                 trailing: IconButton(
-                  icon: const Icon(Icons.visibility_outlined, color: _primaryGreen, size: 20),
+                  icon: Icon(Icons.visibility_outlined, color: _primaryGreen, size: 20),
                   onPressed: () {
                     HapticFeedback.selectionClick();
                     // Simulates decrypting and previewing file
