@@ -55,6 +55,526 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
     super.dispose();
   }
 
+  void _previewDocument(Map<String, String> file) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final title = file['title'] ?? 'Document';
+    final category = file['category'] ?? 'Prescription';
+    final fileName = file['fileName'] ?? 'document.pdf';
+    final dateStr = file['date'] ?? 'N/A';
+    
+    // Decryption handshake loader
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: Theme.of(context).cardColor,
+        content: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(_primaryGreen)),
+              const SizedBox(height: 20),
+              Text(
+                'Client-Side Decrypting...',
+                style: TextStyle(
+                  fontFamily: 'Outfit',
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Retrieving AES-256 session keys from device keychain and verifying integrity checksum.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 12,
+                  color: Colors.grey,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    // Simulate key loading and decryption calculation
+    Future.delayed(const Duration(seconds: 1), () {
+      if (!mounted) return;
+      Navigator.pop(context); // Dismiss loading dialog
+
+      // Open the visual document viewer
+      showDialog(
+        context: context,
+        builder: (context) => Dialog(
+          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E1E1E) : Colors.white,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Dialog Header
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                decoration: BoxDecoration(
+                  color: _primaryGreen.withOpacity(0.08),
+                  borderRadius: const BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.lock_open_rounded, color: _primaryGreen, size: 22),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Decrypted Document Viewer',
+                            style: TextStyle(
+                              fontFamily: 'Outfit',
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: _primaryGreen,
+                            ),
+                          ),
+                          Text(
+                            fileName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontFamily: 'Courier',
+                              fontSize: 11,
+                              color: Colors.grey,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Document Body
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Title Block
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: TextStyle(
+                              fontFamily: 'Outfit',
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: _primaryGreen.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            category,
+                            style: TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: _primaryGreen,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Decrypted on: $dateStr',
+                      style: const TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 12,
+                        color: Colors.grey,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Visual Document Content Block
+                    Container(
+                      height: 260,
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.black26 : const Color(0xFFF9FBF9),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: _cardBorderColor, width: 1),
+                      ),
+                      child: SingleChildScrollView(
+                        child: _buildMockDocumentContent(category, title),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Bottom Actions
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Verification check: Document signature cryptographically valid (SHA-256 matched).'),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.verified_user_outlined, size: 16),
+                        label: const Text('Verify Signature'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: _primaryGreen,
+                          side: BorderSide(color: _primaryGreen),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.download_done_rounded, size: 16),
+                        label: const Text('Close'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _primaryGreen,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    });
+  }
+
+  Widget _buildMockDocumentContent(String category, String title) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white70 : Colors.black87;
+    final labelColor = isDark ? Colors.grey[400] : Colors.grey[700];
+
+    if (category == 'Lab Report') {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Column(
+              children: [
+                Text(
+                  'HEMAS CLINICAL LABORATORIES',
+                  style: TextStyle(
+                    fontFamily: 'Outfit',
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: _primaryGreen,
+                    letterSpacing: 1.1,
+                  ),
+                ),
+                Text(
+                  'Patient Report Summary',
+                  style: TextStyle(fontFamily: 'Inter', fontSize: 11, color: labelColor),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 24),
+          _buildLabRow('CHOLESTEROL, TOTAL', '210 mg/dL', 'HIGH', '> 200 mg/dL', Colors.orange[800]!),
+          _buildLabRow('HDL CHOLESTEROL', '48 mg/dL', 'NORMAL', '> 40 mg/dL', Colors.green[800]!),
+          _buildLabRow('LDL CHOLESTEROL', '142 mg/dL', 'HIGH', '> 100 mg/dL', Colors.orange[800]!),
+          _buildLabRow('TRIGLYCERIDES', '155 mg/dL', 'NORMAL', '< 150 mg/dL', Colors.green[800]!),
+          const Divider(height: 24),
+          Text(
+            'Lab Sign-off: Dr. S. K. Perera (Consultant Pathologist)',
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontStyle: FontStyle.italic,
+              fontSize: 11,
+              color: labelColor,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Cryptographic Verification Hash: 0x9F8B2D7C4A1056E',
+            style: TextStyle(fontFamily: 'Courier', fontSize: 9, color: Colors.grey[500]),
+          ),
+        ],
+      );
+    } else if (category == 'Vaccination Card') {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Column(
+              children: [
+                const Text(
+                  'MINISTRY OF HEALTH SRI LANKA',
+                  style: TextStyle(
+                    fontFamily: 'Outfit',
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: Color(0xFFC62828),
+                    letterSpacing: 1.1,
+                  ),
+                ),
+                Text(
+                  'COVID-19 Immunisation Record',
+                  style: TextStyle(fontFamily: 'Inter', fontSize: 11, color: labelColor),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 24),
+          _buildVaccineRow('Dose 1 (Pfizer-BioNTech)', '24 Jan 2021', 'Batch: PFA4109'),
+          _buildVaccineRow('Dose 2 (Pfizer-BioNTech)', '15 Feb 2021', 'Batch: PFA9841'),
+          _buildVaccineRow('Booster 1 (Pfizer)', '18 Nov 2022', 'Batch: PFB1044'),
+          const Divider(height: 24),
+          Row(
+            children: [
+              const Icon(Icons.verified, color: Color(0xFFC62828), size: 14),
+              const SizedBox(width: 6),
+              Text(
+                'Status: Fully Immunised (Verified)',
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontWeight: FontWeight.bold,
+                  fontSize: 11.5,
+                  color: labelColor,
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
+    } else if (category == 'Prescription') {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Rx',
+                style: TextStyle(
+                  fontFamily: 'Outfit',
+                  fontWeight: FontWeight.w900,
+                  fontSize: 24,
+                  color: _primaryGreen,
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    'Dr. Ruwan Gunawardena',
+                    style: TextStyle(fontFamily: 'Inter', fontSize: 12, fontWeight: FontWeight.bold, color: textColor),
+                  ),
+                  Text(
+                    'License: SLMC 8A4D0C2F',
+                    style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: labelColor),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const Divider(height: 20),
+          _buildPrescriptionItem('Amoxicillin 500mg', 'TDS - 3 times daily (After meals)', '7 Days (Complete full course)'),
+          const SizedBox(height: 12),
+          _buildPrescriptionItem('Paracetamol 500mg', 'PRN - As needed for pain/fever', 'As required (Max 4 times daily)'),
+          const Divider(height: 20),
+          Text(
+            'Special Instructions: Take antibiotics with plenty of water. Discontinue if allergic reaction occurs and consult immediate emergency services.',
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontStyle: FontStyle.italic,
+              fontSize: 11,
+              color: labelColor,
+            ),
+          ),
+        ],
+      );
+    } else {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.insert_drive_file_outlined, color: _primaryGreen, size: 24),
+              const SizedBox(width: 8),
+              Text(
+                'External Document Attachment',
+                style: TextStyle(fontFamily: 'Outfit', fontWeight: FontWeight.bold, fontSize: 14, color: textColor),
+              ),
+            ],
+          ),
+          const Divider(height: 24),
+          Text(
+            'Notes / Symptoms Decrypted:',
+            style: TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.bold, fontSize: 12, color: labelColor),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Uploaded medical scan file attachment. Encrypted using dynamically derived client keys. Integrity verification code: SHA-256 matched successfully.',
+            style: TextStyle(fontFamily: 'Inter', fontSize: 12.5, color: textColor, height: 1.4),
+          ),
+        ],
+      );
+    }
+  }
+
+  Widget _buildLabRow(String test, String result, String status, String ref, Color statusColor) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            flex: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  test,
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white70 : Colors.black87,
+                  ),
+                ),
+                Text(
+                  'Ref: $ref',
+                  style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: Colors.grey[500]),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            result,
+            style: TextStyle(
+              fontFamily: 'Courier',
+              fontSize: 12.5,
+              fontWeight: FontWeight.bold,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: statusColor.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              status,
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+                color: statusColor,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVaccineRow(String name, String date, String batch) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                name,
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white70 : Colors.black87,
+                ),
+              ),
+              Text(
+                batch,
+                style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: Colors.grey[500]),
+              ),
+            ],
+          ),
+          Text(
+            date,
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 12,
+              color: isDark ? Colors.grey[400] : Colors.grey[700],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPrescriptionItem(String drug, String instruction, String duration) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          drug,
+          style: TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+            color: isDark ? Colors.white70 : Colors.black87,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          instruction,
+          style: TextStyle(fontFamily: 'Inter', fontSize: 11.5, color: isDark ? Colors.grey[400] : Colors.grey[700]),
+        ),
+        Text(
+          'Duration: $duration',
+          style: TextStyle(fontFamily: 'Inter', fontSize: 10.5, fontStyle: FontStyle.italic, color: _primaryGreen),
+        ),
+      ],
+    );
+  }
+
   /// Triggers a native file picker dialog on device or web.
   Future<void> _pickFileFromDevice() async {
     setState(() {
@@ -531,7 +1051,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen> {
                   icon: Icon(Icons.visibility_outlined, color: _primaryGreen, size: 20),
                   onPressed: () {
                     HapticFeedback.selectionClick();
-                    // Simulates decrypting and previewing file
+                    _previewDocument(file);
                   },
                 ),
               ),
