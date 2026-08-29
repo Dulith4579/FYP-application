@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/clinical_ai_service.dart';
+import '../services/firebase_phr_service.dart';
+import '../widgets/medical_timeline_card.dart';
+import '../services/translation_service.dart';
 
 /// Stateful screen for local AI-based Clinical Translation and Summarization.
 /// 
 /// Allows users/doctors to input messy OPD notes and translates/summarizes
 /// them using a local Gemma 2 (2B) model running via Ollama.
 class ClinicalAiAnalyzer extends StatefulWidget {
-  const ClinicalAiAnalyzer({super.key});
+  final String? patientId;
+  const ClinicalAiAnalyzer({super.key, this.patientId});
 
   @override
   State<ClinicalAiAnalyzer> createState() => _ClinicalAiAnalyzerState();
@@ -21,6 +26,10 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
   bool _isLoading = false;
   ClinicalAnalysisResult? _analysisResult;
   String? _errorMessage;
+
+  String? _translatedSi;
+  String? _translatedTa;
+  bool _isTranslating = false;
 
   // Design system constants (dynamic for dark mode)
   Color get _primaryGreen => Theme.of(context).brightness == Brightness.dark ? const Color(0xFF81C784) : const Color(0xFF1B5E20);
@@ -52,6 +61,9 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
       _isLoading = true;
       _errorMessage = null;
       _analysisResult = null;
+      _translatedSi = null;
+      _translatedTa = null;
+      _isTranslating = false;
     });
 
     await HapticFeedback.mediumImpact();
@@ -61,10 +73,25 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
       if (mounted) {
         setState(() {
           _analysisResult = result;
+          _isTranslating = true;
         });
+
+        // Trigger Google Cloud Translation for Sinhala and Tamil
+        final plainText = result.plainSummaryTranslations;
+        final siTranslation = await TranslationService.translate(plainText, 'si');
+        final taTranslation = await TranslationService.translate(plainText, 'ta');
+
+        if (mounted) {
+          setState(() {
+            _translatedSi = siTranslation;
+            _translatedTa = taTranslation;
+            _isTranslating = false;
+          });
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Clinical notes analyzed successfully!'),
+            content: const Text('Clinical notes analyzed and translated successfully!'),
             backgroundColor: _primaryGreen,
           ),
         );
@@ -116,7 +143,7 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
         foregroundColor: Colors.white,
         elevation: 0,
         title: const Text(
-          'Local AI Clinical Translator',
+          'AI Clinical Translator',
           style: TextStyle(
             fontFamily: 'Outfit',
             fontWeight: FontWeight.bold,
@@ -134,6 +161,9 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
               // Info Card
               _buildFeatureOverviewCard(),
               const SizedBox(height: 20),
+
+              // Visit Selector Dropdown
+              _buildVisitSelector(),
 
               // Input Card
               _buildInputCard(),
@@ -190,7 +220,7 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Local Gemma 2 Summarization Engine',
+                  'Gemma 2 Summarization Engine',
                   style: TextStyle(
                     fontFamily: 'Outfit',
                     fontSize: 15,
@@ -545,6 +575,45 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
     final result = _analysisResult!;
     return Column(
       children: [
+        // Active Model Status Indicator Badge
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          margin: const EdgeInsets.only(bottom: 16),
+          decoration: BoxDecoration(
+            color: result.isFineTuned
+                ? (isDark ? Colors.green[900]!.withOpacity(0.4) : Colors.green[50])
+                : (isDark ? Colors.amber[900]!.withOpacity(0.4) : Colors.amber[50]),
+            border: Border.all(
+              color: result.isFineTuned ? Colors.green : Colors.amber[700]!,
+              width: 1.2,
+            ),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                result.isFineTuned ? Icons.verified_rounded : Icons.info_outline_rounded,
+                size: 16,
+                color: result.isFineTuned ? Colors.green : Colors.amber[800],
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Inference Model Used: ${result.modelUsed}',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.bold,
+                    color: result.isFineTuned
+                        ? (isDark ? Colors.green[200] : Colors.green[900])
+                        : (isDark ? Colors.amber[200] : Colors.amber[900]),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
         // 1. Extracted Conditions Card
         _buildResultCard(
           title: '1. Extracted Conditions',
@@ -569,8 +638,96 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
           icon: Icons.g_translate_rounded,
           color: isDark ? Colors.indigo[300]! : Colors.indigo[800]!,
           content: result.plainSummaryTranslations,
+          translatedSi: _translatedSi,
+          translatedTa: _translatedTa,
+          isTranslating: _isTranslating,
         ),
       ],
+    );
+  }
+
+  Widget _buildVisitSelector() {
+    if (widget.patientId == null) return const SizedBox.shrink();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebasePhrService.instance.getMedicalTimeline(widget.patientId!),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        final docs = snapshot.data!.docs;
+        return Container(
+          margin: const EdgeInsets.only(bottom: 20),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isDark ? Colors.grey[800]! : Colors.grey[300]!,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Select Recent Consultation Visit to Explain',
+                style: TextStyle(
+                  fontFamily: 'Outfit',
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white70 : Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                decoration: InputDecoration(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  filled: true,
+                  fillColor: isDark ? Colors.grey[900] : const Color(0xFFFAFAFA),
+                ),
+                dropdownColor: Theme.of(context).cardColor,
+                hint: const Text(
+                  'Choose a clinical record...',
+                  overflow: TextOverflow.ellipsis,
+                ),
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 13,
+                  color: isDark ? Colors.white70 : Colors.black87,
+                ),
+                items: docs.map((doc) {
+                  final data = doc.data();
+                  final log = MedicalLog.fromJson(data);
+                  final dateStr = "${log.timestamp.day}/${log.timestamp.month}/${log.timestamp.year}";
+                  return DropdownMenuItem<String>(
+                    value: log.logId,
+                    child: Text(
+                      "$dateStr: ${log.clinical.condition} (by ${log.doctor.name})",
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                      style: const TextStyle(fontSize: 13, fontFamily: 'Inter'),
+                    ),
+                  );
+                }).toList(),
+                onChanged: (logId) {
+                  if (logId == null) return;
+                  final doc = docs.firstWhere((d) => d.id == logId);
+                  final log = MedicalLog.fromJson(doc.data());
+                  // Decrypt and populate notes
+                  final textToPopulate = "Condition: ${log.clinical.condition}. Medication: ${log.clinical.medication}. Dosage: ${log.clinical.dosage}. Notes: ${log.clinical.notes}.";
+                  _notesController.text = textToPopulate;
+                  // Auto trigger analysis
+                  _analyzeRecord();
+                },
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -579,6 +736,9 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
     required IconData icon,
     required Color color,
     required String content,
+    String? translatedSi,
+    String? translatedTa,
+    bool isTranslating = false,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
@@ -624,14 +784,101 @@ class _ClinicalAiAnalyzerState extends State<ClinicalAiAnalyzer> {
             // Card Content
             Padding(
               padding: const EdgeInsets.all(16),
-              child: Text(
-                content,
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontSize: 13.5,
-                  height: 1.45,
-                  color: isDark ? Colors.white70 : Colors.black87,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (translatedSi != null || translatedTa != null || isTranslating) ...[
+                    Text(
+                      'English Explanation',
+                      style: TextStyle(
+                        fontFamily: 'Outfit',
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.grey[400] : Colors.grey[700],
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                  ],
+                  Text(
+                    content,
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 13.5,
+                      height: 1.45,
+                      color: isDark ? Colors.white70 : Colors.black87,
+                    ),
+                  ),
+                  if (translatedSi != null || translatedTa != null || isTranslating) ...[
+                    const SizedBox(height: 16),
+                    const Divider(),
+                    const SizedBox(height: 12),
+                  ],
+                  if (isTranslating)
+                    Row(
+                      children: [
+                        const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Translating into Sinhala & Tamil...',
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 12,
+                            fontStyle: FontStyle.italic,
+                            color: isDark ? Colors.grey[400] : Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    )
+                  else ...[
+                    if (translatedSi != null) ...[
+                      Text(
+                        'සිංහල පරිවර්තනය (Sinhala)',
+                        style: TextStyle(
+                          fontFamily: 'Outfit',
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: _primaryGreen,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        translatedSi,
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 13.5,
+                          height: 1.45,
+                          color: isDark ? Colors.white70 : Colors.black87,
+                        ),
+                      ),
+                    ],
+                    if (translatedTa != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        'தமிழ் மொழிபெயர்ப்பு (Tamil)',
+                        style: TextStyle(
+                          fontFamily: 'Outfit',
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.amber[800],
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        translatedTa,
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 13.5,
+                          height: 1.45,
+                          color: isDark ? Colors.white70 : Colors.black87,
+                        ),
+                      ),
+                    ],
+                  ],
+                ],
               ),
             ),
           ],
