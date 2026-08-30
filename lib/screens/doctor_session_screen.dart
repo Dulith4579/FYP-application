@@ -40,6 +40,7 @@ class _DoctorSessionScreenState extends State<DoctorSessionScreen> {
   final _medicationController = TextEditingController();
   final _dosageController = TextEditingController();
   final _notesController = TextEditingController();
+  final _heartRateController = TextEditingController();
 
   // AI Shorthand notes parser controllers and state
   final _aiShorthandController = TextEditingController();
@@ -60,6 +61,9 @@ class _DoctorSessionScreenState extends State<DoctorSessionScreen> {
   String? _historySummary;
   bool _isGeneratingSummary = false;
   String? _summaryError;
+  SummarizerModelMode _selectedModelMode = SummarizerModelMode.autoFineTunedFirst;
+  String? _lastModelUsed;
+  bool? _lastIsFineTuned;
   
   // Next Clinic Date scheduled from the doctor/clinical institution side
   DateTime? _nextClinicDate;
@@ -282,12 +286,36 @@ class _DoctorSessionScreenState extends State<DoctorSessionScreen> {
         );
       }
     } catch (e) {
-      debugPrint("Failed to decrypt patient E2EE key: $e");
+      debugPrint("Failed to decrypt patient E2EE key: $e. Falling back to derived patient key.");
+      if (_selectedPatientId.isNotEmpty) {
+        final fallbackKey = EncryptionService.deriveKey('passcode_fyp_123', _selectedPatientId);
+        EncryptionService.setActiveKey(fallbackKey);
+      }
     }
   }
 
   void _generateSessionId() {
     _sessionId = 'sess_${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
+  }
+
+  void _clearFormFields() {
+    setState(() {
+      _conditionController.clear();
+      _medicationController.clear();
+      _dosageController.clear();
+      _notesController.clear();
+      _aiShorthandController.clear();
+      _heartRateController.clear();
+      _activeDraft = null;
+      _allergyWarningMessage = null;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Consultation form cleared.'),
+        backgroundColor: _primaryGreen,
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   @override
@@ -298,6 +326,7 @@ class _DoctorSessionScreenState extends State<DoctorSessionScreen> {
     _dosageController.dispose();
     _notesController.dispose();
     _aiShorthandController.dispose();
+    _heartRateController.dispose();
     super.dispose();
   }
 
@@ -340,9 +369,14 @@ class _DoctorSessionScreenState extends State<DoctorSessionScreen> {
         return "Record Date: $dateStr. Condition: ${l.clinical.condition}. Medication: ${l.clinical.medication}. Dosage: ${l.clinical.dosage}. Notes: ${l.clinical.notes}.";
       }).join('\n');
 
-      final result = await ClinicalAiService.instance.analyzePatientHistoryForDoctor(concatenatedHistory);
+      final result = await ClinicalAiService.instance.analyzePatientHistoryForDoctor(
+        concatenatedHistory,
+        modelMode: _selectedModelMode,
+      );
       setState(() {
         _historySummary = result.plainSummaryTranslations;
+        _lastModelUsed = result.modelUsed;
+        _lastIsFineTuned = result.isFineTuned;
       });
     } catch (e) {
       setState(() {
@@ -715,6 +749,9 @@ class _DoctorSessionScreenState extends State<DoctorSessionScreen> {
                       onPressed: () {
                         setState(() {
                           _isDemoAuthorized = true;
+                          _selectedPatientId = 'patient_014172';
+                          final derivedKey = EncryptionService.deriveKey('passcode_fyp_123', 'patient_014172');
+                          EncryptionService.setActiveKey(derivedKey);
                         });
                       },
                       icon: const Icon(Icons.flash_on, size: 16),
@@ -1073,17 +1110,60 @@ class _DoctorSessionScreenState extends State<DoctorSessionScreen> {
               ],
             ],
 
-            Text(
-              'LOG DIAGNOSIS & PRESCRIPTION',
-              style: TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 11,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1.2,
-                color: _darkGrey,
-              ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'LOG DIAGNOSIS & PRESCRIPTION',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.2,
+                    color: _darkGrey,
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: _clearFormFields,
+                  icon: const Icon(Icons.cleaning_services_outlined, size: 14),
+                  label: const Text(
+                    'Clear Consultation Form',
+                    style: TextStyle(fontFamily: 'Inter', fontSize: 11.5, fontWeight: FontWeight.bold),
+                  ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.red[700],
+                    padding: EdgeInsets.zero,
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
+
+            // Vitals Input (Vitals Guard Validation)
+            TextFormField(
+              controller: _heartRateController,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(fontFamily: 'Inter', fontSize: 14),
+              decoration: InputDecoration(
+                labelText: 'Heart Rate (bpm) [Vitals Guard]',
+                hintText: 'e.g., 72',
+                labelStyle: const TextStyle(fontFamily: 'Inter'),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                prefixIcon: Icon(Icons.favorite, color: _primaryGreen),
+              ),
+              validator: (val) {
+                if (val != null && val.trim().isNotEmpty) {
+                  final hr = int.tryParse(val.trim());
+                  if (hr == null || hr < 30 || hr > 220) {
+                    return 'Out of physiological range (30-220 bpm)';
+                  }
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 16),
 
             // Diagnostic Input Form Inputs
             TextFormField(
@@ -1569,24 +1649,106 @@ class _DoctorSessionScreenState extends State<DoctorSessionScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Icon(Icons.summarize_rounded, color: _primaryGreen, size: 20),
-              const SizedBox(width: 8),
-              Text(
-                'AI Clinical History Summary',
-                style: TextStyle(
-                  fontFamily: 'Outfit',
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
-                  color: _primaryGreen,
+              Row(
+                children: [
+                  Icon(Icons.summarize_rounded, color: _primaryGreen, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'AI Clinical History Summary',
+                    style: TextStyle(
+                      fontFamily: 'Outfit',
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: _primaryGreen,
+                    ),
+                  ),
+                ],
+              ),
+              // Model Selector Dropdown
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.grey[900] : Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: isDark ? Colors.grey[800]! : Colors.grey[300]!),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<SummarizerModelMode>(
+                    value: _selectedModelMode,
+                    isDense: true,
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white70 : Colors.black87,
+                    ),
+                    items: SummarizerModelMode.values.map((mode) {
+                      return DropdownMenuItem<SummarizerModelMode>(
+                        value: mode,
+                        child: Text(mode.label),
+                      );
+                    }).toList(),
+                    onChanged: (newMode) {
+                      if (newMode != null) {
+                        setState(() {
+                          _selectedModelMode = newMode;
+                        });
+                      }
+                    },
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
+
+          // Active Model Status Indicator Badge
+          if (_lastModelUsed != null) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: (_lastIsFineTuned ?? false)
+                    ? (isDark ? Colors.green[900]!.withOpacity(0.4) : Colors.green[50])
+                    : (isDark ? Colors.amber[900]!.withOpacity(0.4) : Colors.amber[50]),
+                border: Border.all(
+                  color: (_lastIsFineTuned ?? false) ? Colors.green : Colors.amber[700]!,
+                  width: 1.2,
+                ),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    (_lastIsFineTuned ?? false) ? Icons.verified_rounded : Icons.info_outline_rounded,
+                    size: 15,
+                    color: (_lastIsFineTuned ?? false) ? Colors.green : Colors.amber[800],
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Active Model: $_lastModelUsed',
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: (_lastIsFineTuned ?? false)
+                            ? (isDark ? Colors.green[200] : Colors.green[900])
+                            : (isDark ? Colors.amber[200] : Colors.amber[900]),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
           if (_historySummary == null) ...[
             Text(
-              'No summary generated yet. Generate an AI summary to scan all longitudinal records instantly.',
+              'No summary generated yet. Generate an AI summary to synthesize all longitudinal records into a clinical handover.',
               style: TextStyle(fontFamily: 'Inter', fontSize: 12.5, color: isDark ? Colors.grey[400] : Colors.grey[600]),
             ),
             const SizedBox(height: 12),

@@ -13,6 +13,9 @@ import 'past_records_screen.dart';
 class MainNavigationWrapper extends StatefulWidget {
   const MainNavigationWrapper({super.key});
 
+  // Static notifier to coordinate tab switches programmatically (e.g. switching from Family page back to Home)
+  static final ValueNotifier<int> activeTabNotifier = ValueNotifier<int>(0);
+
   @override
   State<MainNavigationWrapper> createState() => _MainNavigationWrapperState();
 }
@@ -20,9 +23,30 @@ class MainNavigationWrapper extends StatefulWidget {
 class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
   int _currentIndex = 0;
 
+  @override
+  void initState() {
+    super.initState();
+    MainNavigationWrapper.activeTabNotifier.value = 0;
+    MainNavigationWrapper.activeTabNotifier.addListener(_onTabChanged);
+  }
+
+  @override
+  void dispose() {
+    MainNavigationWrapper.activeTabNotifier.removeListener(_onTabChanged);
+    super.dispose();
+  }
+
+  void _onTabChanged() {
+    if (mounted) {
+      setState(() {
+        _currentIndex = MainNavigationWrapper.activeTabNotifier.value;
+      });
+    }
+  }
+
   // Colors mapping the Clinical Green theme
-  static const Color _primaryGreen = Color(0xFF1B5E20);   // Deep Forest Green
-  static const Color _accentGreen = Color(0xFF4CAF50);    // Mint Green
+  Color get _primaryGreen => Theme.of(context).brightness == Brightness.dark ? const Color(0xFF81C784) : const Color(0xFF1B5E20);
+  Color get _accentGreen => const Color(0xFF4CAF50); // Mint Green
 
   // Stateful screen index stacks
   final List<Widget> _screens = const [
@@ -34,6 +58,7 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
@@ -44,7 +69,7 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
           indicatorColor: _accentGreen.withOpacity(0.25),
           labelTextStyle: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.selected)) {
-              return const TextStyle(
+              return TextStyle(
                 fontFamily: 'Inter',
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
@@ -54,25 +79,23 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
             return TextStyle(
               fontFamily: 'Inter',
               fontSize: 12,
-              color: Colors.grey[600],
+              color: isDark ? Colors.grey[400] : Colors.grey[600],
             );
           }),
           iconTheme: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.selected)) {
-              return const IconThemeData(color: _primaryGreen);
+              return IconThemeData(color: _primaryGreen);
             }
-            return IconThemeData(color: Colors.grey[600]);
+            return IconThemeData(color: isDark ? Colors.grey[400] : Colors.grey[600]);
           }),
         ),
         child: NavigationBar(
           selectedIndex: _currentIndex,
-          backgroundColor: Colors.white,
+          backgroundColor: Theme.of(context).cardColor,
           elevation: 8,
           onDestinationSelected: (index) {
             HapticFeedback.selectionClick();
-            setState(() {
-              _currentIndex = index;
-            });
+            MainNavigationWrapper.activeTabNotifier.value = index;
           },
           destinations: const [
             NavigationDestination(
