@@ -1,5 +1,17 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:pointycastle/api.dart';
+import 'package:pointycastle/asymmetric/api.dart';
+import 'package:pointycastle/asymmetric/pkcs1.dart';
+import 'package:pointycastle/asymmetric/rsa.dart';
+import 'package:crypto/crypto.dart' as crypto;
+import 'package:encrypt/encrypt.dart' as enc;
 import 'encryption_service.dart';
+import 'translation_service.dart';
 
 /// Service class orchestrating database interactions with Firebase Firestore
 /// for the AI-Based Personal Health Record (PHR) System.
@@ -96,16 +108,135 @@ class FirebasePhrService {
   /// Sets or resets a session document back to standard 'pending' status.
   /// 
   /// Path: `sessions/{sessionId}`
-  Future<void> resetSession(String sessionId) async {
+  Future<void> resetSession(String sessionId, String doctorUid, String doctorName, String license) async {
     try {
       await _db.collection('sessions').doc(sessionId).set({
         'status': 'pending',
         'patientId': '',
         'accessLevel': '',
+        'doctorUid': doctorUid,
+        'doctorName': doctorName,
+        'license': license,
         'expiresAt': DateTime.now().add(const Duration(minutes: 15)),
       });
     } catch (e) {
       throw Exception('Failed to reset session: $e');
+    }
+  }
+
+  // Memory fallback for doctor keys
+  static final Map<String, String> _doctorKeyMemoryStorage = {};
+
+  /// Initializes doctor keys in local secure storage and Firestore.
+  Future<void> initializeDoctorKeys(String doctorId) async {
+    const secureStorage = FlutterSecureStorage();
+    String? privKeyStr;
+    String? pubKeyStr;
+    
+    try {
+      privKeyStr = await secureStorage.read(key: 'rsa_priv_$doctorId').timeout(const Duration(seconds: 1));
+      pubKeyStr = await secureStorage.read(key: 'rsa_pub_$doctorId').timeout(const Duration(seconds: 1));
+    } catch (e) {
+      debugPrint('Doctor secure storage read failed, using memory fallback: $e');
+      privKeyStr = _doctorKeyMemoryStorage['rsa_priv_$doctorId'];
+      pubKeyStr = _doctorKeyMemoryStorage['rsa_pub_$doctorId'];
+    }
+    
+    if (privKeyStr == null || pubKeyStr == null) {
+      // Offload CPU-intensive RSA keypair generation off the main UI thread
+      final pair = await compute((_) => EncryptionService.generateRSAKeyPair(), null);
+      privKeyStr = EncryptionService.serializePrivateKey(pair.privateKey);
+      pubKeyStr = EncryptionService.serializePublicKey(pair.publicKey);
+      
+      try {
+        await secureStorage.write(key: 'rsa_priv_$doctorId', value: privKeyStr);
+        await secureStorage.write(key: 'rsa_pub_$doctorId', value: pubKeyStr);
+      } catch (e) {
+        debugPrint('Doctor secure storage write failed, using memory fallback: $e');
+        _doctorKeyMemoryStorage['rsa_priv_$doctorId'] = privKeyStr;
+        _doctorKeyMemoryStorage['rsa_pub_$doctorId'] = pubKeyStr;
+      }
+    }
+    
+    // Upload public key to Firestore asynchronously
+    if (Firebase.apps.isNotEmpty) {
+      unawaited(_db.collection('users').doc(doctorId).set({
+        'publicKey': pubKeyStr,
+      }, SetOptions(merge: true)));
+    }
+  }
+
+  /// Decrypts the patient's AES session key using the doctor's private RSA key.
+  Future<String> decryptSessionKey(String doctorId, String encryptedAesKeyBase64) async {
+    const secureStorage = FlutterSecureStorage();
+    String? privKeyStr;
+    try {
+      privKeyStr = await secureStorage.read(key: 'rsa_priv_$doctorId');
+    } catch (e) {
+      debugPrint('Decrypt secure storage read failed, using memory fallback: $e');
+    }
+    
+    privKeyStr ??= _doctorKeyMemoryStorage['rsa_priv_$doctorId'];
+    
+    if (privKeyStr == null) {
+      throw Exception('Doctor private RSA key not initialized.');
+    }
+    
+    final privKey = EncryptionService.deserializePrivateKey(privKeyStr);
+    final encryptedBytes = base64.decode(encryptedAesKeyBase64);
+    
+    final decrypter = PKCS1Encoding(RSAEngine())
+      ..init(false, PrivateKeyParameter<RSAPrivateKey>(privKey));
+    
+    final decryptedBytes = decrypter.process(Uint8List.fromList(encryptedBytes));
+    return utf8.decode(decryptedBytes);
+  }
+
+  // --- FIRESTORE BLOCKCHAIN LEDGER HASH-CHAINING STATE ---
+  static String _lastBlockHash = '0000000000000000000000000000000000000000000000000000000000000000';
+  static int _blockchainHeight = 0;
+
+  /// Cryptographically links records into a sequential SHA-256 hash-chain block
+  static Map<String, dynamic> _generateBlockchainBlock(String dataPayloadStr) {
+    _blockchainHeight++;
+    final dataHash = crypto.sha256.convert(utf8.encode(dataPayloadStr)).toString();
+    final previousHash = _lastBlockHash;
+    final blockHash = crypto.sha256.convert(utf8.encode('$_blockchainHeight|$previousHash|$dataHash')).toString();
+    _lastBlockHash = blockHash;
+
+    return {
+      'blockIndex': _blockchainHeight,
+      'previousHash': previousHash,
+      'dataHash': dataHash,
+      'blockHash': blockHash,
+      'timestamp': DateTime.now().toIso8601String(),
+    };
+  }
+
+  /// Appends an immutable audit log receipt to the audit_logs collection with Blockchain Block headers.
+  Future<void> logAudit({
+    required String actorId,
+    required String actorRole,
+    required String action,
+    required String details,
+    required String patientId,
+    String? sessionId,
+  }) async {
+    final blockHeader = _generateBlockchainBlock('$actorId|$actorRole|$action|$details|$patientId');
+    if (Firebase.apps.isEmpty) return;
+    try {
+      await _db.collection('audit_logs').add({
+        'timestamp': FieldValue.serverTimestamp(),
+        'actorId': actorId,
+        'actorRole': actorRole,
+        'action': action,
+        'details': details,
+        'patientId': patientId,
+        'sessionId': sessionId ?? '',
+        'blockchain': blockHeader,
+      });
+    } catch (e) {
+      debugPrint("Failed to log audit receipt: $e");
     }
   }
 
@@ -117,12 +248,14 @@ class FirebasePhrService {
   /// so translations instantly appear on the patient dashboard UI when written.
   Future<void> submitDiagnosisLog({
     required String patientId,
+    required String patientName,
     required String condition,
     required String medication,
     required String dosage,
     required String notes,
     required String doctorName,
     required String license,
+    required String doctorUid,
   }) async {
     try {
       final timelineCollection = _db
@@ -132,54 +265,72 @@ class FirebasePhrService {
 
       final logId = 'log_${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
 
-      // --- MOCK AI TRANSLATION RULE MAPPING FOR THE DEMO ---
-      String conditionSi = 'AI පරිවර්තනය ක්‍රියාත්මක වෙමින් පවතී...';
-      String conditionTa = 'AI மொழிபெயர்ப்பு நிலுவையில் உள்ளது...';
-      String medicationSi = 'ඖෂධ උපදෙස් AI පරිවර්තනය ක්‍රියාත්මක වෙමින් පවතී...';
-      String medicationTa = 'மருந்து வழிமுறைகள் AI மொழிபெயர்ப்பு நிலுவையில் உள்ளது...';
+      // --- LIVE GOOGLE TRANSLATION SERVICES ---
+      String conditionSi = condition;
+      String conditionTa = condition;
+      String medicationSi = medication;
+      String medicationTa = medication;
+      String notesSi = notes;
+      String notesTa = notes;
 
-      final conditionLower = condition.toLowerCase();
-      final medicationLower = medication.toLowerCase();
+      try {
+        final List<String> translationResults = await Future.wait([
+          TranslationService.translate(condition, 'si'),
+          TranslationService.translate(condition, 'ta'),
+          TranslationService.translate(medication, 'si'),
+          TranslationService.translate(medication, 'ta'),
+          TranslationService.translate(notes, 'si'),
+          TranslationService.translate(notes, 'ta'),
+        ]);
 
-      if (conditionLower.contains('diabetes') || conditionLower.contains('sugar')) {
-        conditionSi = '2 වන කාණ්ඩයේ දියවැඩියාව (පාලනය කළ යුතු)';
-        conditionTa = 'வகை 2 நீரிழிவு நோய்';
-      } else if (conditionLower.contains('hypertension') || conditionLower.contains('pressure')) {
-        conditionSi = 'අධික රුධිර පීඩනය (හෘද හා රුධිර වාහිනී ආශ්‍රිත)';
-        conditionTa = 'அத்தியாவசிய உயர் இரத்த அழுத்தம்';
-      } else if (conditionLower.contains('cholesterol') || conditionLower.contains('lipids')) {
-        conditionSi = 'අධික කොලෙස්ටරෝල් තත්ත්වය (රුධිරයේ මේදය වැඩිවීම)';
-        conditionTa = 'உயர் கொழுப்பு';
+        conditionSi = translationResults[0];
+        conditionTa = translationResults[1];
+        medicationSi = translationResults[2];
+        medicationTa = translationResults[3];
+        notesSi = translationResults[4];
+        notesTa = translationResults[5];
+      } catch (e) {
+        // Fallback to input string if translation api fails or key is missing
+        debugPrint("Real-time Translation failed, using fallback: $e");
       }
 
-      if (medicationLower.contains('metformin')) {
-        medicationSi = 'දියවැඩියාව පාලනය සඳහා ආහාර ගැනීමෙන් පසු ලබාගන්නා ඖෂධයකි.';
-        medicationTa = 'நீரிழிவு நோயைக் கட்டுப்படுத்த உணவுக்குப் பின் உட்கொள்ளும் மருந்து.';
-      } else if (medicationLower.contains('losartan')) {
-        medicationSi = 'රුධිර පීඩනය පාලනය කිරීම සඳහා දිනපතා ලබාගන්නා ඖෂධයකි.';
-        medicationTa = 'இரத்த அழுத்தத்தைக் கட்டுப்படுத்த தினசரி உட்கொள்ளும் மருந்து.';
-      } else if (medicationLower.contains('atorvastatin')) {
-        medicationSi = 'රුධිරයේ අහිතකර කොලෙස්ටරෝල් මට්ටම අඩු කිරීම සඳහා රාත්‍රී කාලයේ ගන්නා ඖෂධයකි.';
-        medicationTa = 'இரத்த கொழுப்பைக் குறைக்க இரவில் உட்கொள்ளும் மருந்து.';
+      // Derive key for patient so both patient and doctor can decrypt seamlessly
+      final String patientKeyBase64 = EncryptionService.deriveKey('passcode_fyp_123', patientId);
+      final patientKey = enc.Key.fromBase64(patientKeyBase64);
+
+      final String encryptedCondition = EncryptionService.encrypt(condition, key: patientKey);
+      final String encryptedMedication = EncryptionService.encrypt(medication, key: patientKey);
+      final String encryptedNotes = EncryptionService.encrypt(notes, key: patientKey);
+
+      // Retrieve doctor keys to sign the medical record
+      const secureStorage = FlutterSecureStorage();
+      final privKeyStr = await secureStorage.read(key: 'rsa_priv_$doctorUid');
+      final pubKeyStr = await secureStorage.read(key: 'rsa_pub_$doctorUid');
+      
+      String signatureBlock = 'Unsigned';
+      if (privKeyStr != null) {
+        final privKey = EncryptionService.deserializePrivateKey(privKeyStr);
+        final plainTextToSign = '$condition|$medication|$dosage|$notes|$doctorName|$license';
+        signatureBlock = EncryptionService.rsaSign(plainTextToSign, privKey);
       }
 
-      final String encryptedCondition = EncryptionService.encrypt(condition);
-      final String encryptedMedication = EncryptionService.encrypt(medication);
-      final String encryptedNotes = EncryptionService.encrypt(notes);
+      final blockHeader = _generateBlockchainBlock('$logId|$patientId|$doctorUid|$encryptedCondition|$encryptedMedication');
 
       await timelineCollection.doc(logId).set({
         'logId': logId,
+        'patientName': patientName,
         'timestamp': FieldValue.serverTimestamp(),
         'doctor': {
           'name': doctorName,
           'license': license,
-          'digitalSignature': '0x${DateTime.now().millisecondsSinceEpoch.toRadixString(16).toUpperCase()}8A4D0C2F',
+          'digitalSignature': signatureBlock,
+          'publicKey': pubKeyStr ?? '',
         },
         'clinical': {
           'condition': encryptedCondition,
-          'conditionCode': conditionLower.contains('diabetes') ? 'ICD-10-E11' : (conditionLower.contains('hypertension') ? 'ICD-10-I10' : 'SNOMED-CT-394883002'),
+          'conditionCode': condition.toLowerCase().contains('diabetes') ? 'ICD-10-E11' : (condition.toLowerCase().contains('hypertension') ? 'ICD-10-I10' : 'SNOMED-CT-394883002'),
           'medication': encryptedMedication,
-          'medicationCode': medicationLower.contains('metformin') ? 'RxNorm-311697' : (medicationLower.contains('losartan') ? 'RxNorm-855332' : 'RxNorm-Generic'),
+          'medicationCode': medication.toLowerCase().contains('metformin') ? 'RxNorm-311697' : (medication.toLowerCase().contains('losartan') ? 'RxNorm-855332' : 'RxNorm-Generic'),
           'dosage': dosage,
           'notes': encryptedNotes,
         },
@@ -188,10 +339,20 @@ class FirebasePhrService {
           'condition_ta': conditionTa,
           'medication_si': medicationSi,
           'medication_ta': medicationTa,
-          'notes_si': notes.isNotEmpty ? 'විශේෂ උපදෙස්: $notes' : '',
-          'notes_ta': notes.isNotEmpty ? 'குறிப்பு: $notes' : '',
-        }
+          'notes_si': notesSi.isNotEmpty ? 'විශේෂ උපදෙස්: $notesSi' : '',
+          'notes_ta': notesTa.isNotEmpty ? 'குறிப்பு: $notesTa' : '',
+        },
+        'blockchain': blockHeader,
       });
+
+      // Write immutable audit log for the creation event
+      await logAudit(
+        actorId: doctorUid,
+        actorRole: 'doctor',
+        action: 'CREATED_RECORD',
+        details: 'Created and cryptographically signed timeline record $logId for patient $patientId',
+        patientId: patientId,
+      );
     } catch (e) {
       throw Exception('Failed to submit clinical timeline log: $e');
     }
@@ -266,6 +427,123 @@ class FirebasePhrService {
       'createdAt': FieldValue.serverTimestamp(),
     });
 
+    // Mock ADRs
+    final adrCollection = _db.collection('users').doc(patientId).collection('adrs');
+    batch.set(adrCollection.doc('adr_penicillin'), {
+      'drugName': 'Penicillin',
+      'reaction': 'Allergic skin rashes (Urticaria)',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    batch.set(adrCollection.doc('adr_metformin'), {
+      'drugName': 'Metformin',
+      'reaction': 'Severe gastrointestinal cramps',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    batch.set(adrCollection.doc('adr_aspirin'), {
+      'drugName': 'Aspirin',
+      'reaction': 'Gastric mucosal irritation & acidity',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
     await batch.commit();
+  }
+
+  /// Saves a new suspected Adverse Drug Reaction (ADR) under the patient's record.
+  Future<void> addAdr({
+    required String patientId,
+    required String drugName,
+    required String reaction,
+  }) async {
+    try {
+      await _db
+          .collection('users')
+          .doc(patientId)
+          .collection('adrs')
+          .add({
+        'drugName': drugName,
+        'reaction': reaction,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      throw Exception('Failed to save ADR: $e');
+    }
+  }
+
+  /// Updates an existing suspected Adverse Drug Reaction (ADR) under the patient's record.
+  Future<void> updateAdr({
+    required String patientId,
+    required String adrId,
+    required String drugName,
+    required String reaction,
+  }) async {
+    try {
+      await _db
+          .collection('users')
+          .doc(patientId)
+          .collection('adrs')
+          .doc(adrId)
+          .update({
+        'drugName': drugName,
+        'reaction': reaction,
+      });
+    } catch (e) {
+      throw Exception('Failed to update ADR: $e');
+    }
+  }
+
+  /// Deletes a suspected Adverse Drug Reaction (ADR) under the patient's record.
+  Future<void> deleteAdr({
+    required String patientId,
+    required String adrId,
+  }) async {
+    try {
+      await _db
+          .collection('users')
+          .doc(patientId)
+          .collection('adrs')
+          .doc(adrId)
+          .delete();
+    } catch (e) {
+      throw Exception('Failed to delete ADR: $e');
+    }
+  }
+
+  /// Retrieves a real-time stream of the patient's Adverse Drug Reactions (ADRs).
+  Stream<QuerySnapshot<Map<String, dynamic>>> getAdrs(String patientId) {
+    return _db
+        .collection('users')
+        .doc(patientId)
+        .collection('adrs')
+        .orderBy('createdAt', descending: true)
+        .snapshots();
+  }
+
+  /// Submits an appointment request to the Firestore database.
+  Future<void> requestAppointment({
+    required String patientId,
+    required String doctorName,
+    required String specialty,
+    required String facilityName,
+    required bool isGovernmentHospital,
+    required DateTime dateTime,
+  }) async {
+    try {
+      await _db
+          .collection('users')
+          .doc(patientId)
+          .collection('appointments')
+          .doc('next')
+          .set({
+        'doctorName': doctorName,
+        'specialty': specialty,
+        'facilityName': facilityName,
+        'isGovernmentHospital': isGovernmentHospital,
+        'dateTime': Timestamp.fromDate(dateTime),
+        'clinicRoom': isGovernmentHospital ? 'Clinic Room 12' : 'Consultation Suite B',
+        'status': 'confirmed',
+      });
+    } catch (e) {
+      throw Exception('Failed to request appointment: $e');
+    }
   }
 }

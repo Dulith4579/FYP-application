@@ -50,11 +50,13 @@ class DoctorMetadata {
   final String name;
   final String license;
   final String digitalSignature;
+  final String publicKey;
 
   DoctorMetadata({
     required this.name,
     required this.license,
     required this.digitalSignature,
+    this.publicKey = '',
   });
 
   factory DoctorMetadata.fromJson(Map<String, dynamic> json) {
@@ -62,6 +64,7 @@ class DoctorMetadata {
       name: json['name'] as String? ?? 'Unknown Practitioner',
       license: json['license'] as String? ?? 'N/A',
       digitalSignature: json['digitalSignature'] as String? ?? 'Unsigned',
+      publicKey: json['publicKey'] as String? ?? '',
     );
   }
 
@@ -69,6 +72,7 @@ class DoctorMetadata {
     'name': name,
     'license': license,
     'digitalSignature': digitalSignature,
+    'publicKey': publicKey,
   };
 }
 
@@ -169,25 +173,104 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
   // Active Tab Index: 0 for Clinical, 1 for Simplified
   int _activeViewIndex = 0;
 
-  // Clinical Green Colors
-  static const Color _primaryGreen = Color(0xFF1B5E20);   // Deep Forest Green
-  static const Color _accentGreen = Color(0xFF4CAF50);    // Mint Green
-  static const Color _bgColor = Color(0xFFF5F7F5);        // Clean Light Slate/Grey
-  static const Color _cardBorderColor = Color(0xFFC8E6C9); // Mint Accent Border
-  static const Color _darkGrey = Color(0xFF37474F);
+  // Clinical Green Colors (dynamic for dark mode compatibility)
+  Color get _primaryGreen => Theme.of(context).brightness == Brightness.dark ? const Color(0xFF81C784) : const Color(0xFF1B5E20);
+  Color get _accentGreen => const Color(0xFF4CAF50);
+  Color get _bgColor => Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E1E1E) : const Color(0xFFF5F7F5);
+  Color get _cardBorderColor => Theme.of(context).brightness == Brightness.dark ? const Color(0xFF2E7D32) : const Color(0xFFC8E6C9);
+  Color get _darkGrey => Theme.of(context).brightness == Brightness.dark ? Colors.white70 : const Color(0xFF37474F);
+
+  bool get _isSignatureVerified {
+    if (widget.log.doctor.digitalSignature == 'Unsigned' || widget.log.doctor.publicKey.isEmpty) {
+      return false;
+    }
+    try {
+      final pubKey = EncryptionService.deserializePublicKey(widget.log.doctor.publicKey);
+      final plainText = '${widget.log.clinical.condition}|${widget.log.clinical.medication}|${widget.log.clinical.dosage}|${widget.log.clinical.notes}|${widget.log.doctor.name}|${widget.log.doctor.license}';
+      return EncryptionService.rsaVerify(plainText, widget.log.doctor.digitalSignature, pubKey);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Widget _buildSignatureBadge(bool isDark) {
+    final String sig = widget.log.doctor.digitalSignature;
+    final String pubKey = widget.log.doctor.publicKey;
+    
+    final isRsaSig = sig != 'Unsigned' && pubKey.isNotEmpty;
+    final isRsaValid = isRsaSig && _isSignatureVerified;
+    final isLegacy = sig.startsWith('0x');
+
+    if (isRsaValid) {
+      return Row(
+        children: [
+          const Icon(Icons.gpp_good_rounded, color: Colors.green, size: 14),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              'RSA Asymmetric Signature: Verified & Authenticated (E2EE E2E)',
+              style: const TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 10.5,
+                fontWeight: FontWeight.bold,
+                color: Colors.green,
+              ),
+            ),
+          ),
+        ],
+      );
+    } else if (isLegacy) {
+      return Row(
+        children: [
+          Icon(Icons.info_outline_rounded, color: Colors.amber[800], size: 14),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              'Legacy System Hash (Unverified / Spoofable doctor digitalSignature)',
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 10.5,
+                fontWeight: FontWeight.bold,
+                color: Colors.amber[800],
+              ),
+            ),
+          ),
+        ],
+      );
+    } else {
+      return Row(
+        children: [
+          const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 14),
+          const SizedBox(width: 6),
+          const Expanded(
+            child: Text(
+              'Clinician Record Unsigned (Missing non-repudiation security block)',
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 10.5,
+                fontWeight: FontWeight.bold,
+                color: Colors.red,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final formattedDate = _formatClinicalDate(widget.log.timestamp);
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Card(
       elevation: 0,
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
-        side: const BorderSide(color: _cardBorderColor, width: 1.5),
+        side: BorderSide(color: _cardBorderColor, width: 1.5),
       ),
-      color: Colors.white,
+      color: Theme.of(context).cardColor,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -208,7 +291,7 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                             color: _primaryGreen.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          child: const Icon(
+                          child: Icon(
                             Icons.favorite_rounded,
                             color: _primaryGreen,
                             size: 18,
@@ -221,7 +304,7 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                             fontFamily: 'Inter',
                             fontSize: 13,
                             fontWeight: FontWeight.bold,
-                            color: Colors.grey[700],
+                            color: isDark ? Colors.grey[400] : Colors.grey[700],
                           ),
                         ),
                       ],
@@ -235,9 +318,9 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
-                        children: const [
+                        children: [
                           Icon(Icons.lock_outline_rounded, size: 12, color: _primaryGreen),
-                          SizedBox(width: 4),
+                          const SizedBox(width: 4),
                           Text(
                             'HIPAA Secured',
                             style: TextStyle(
@@ -260,7 +343,7 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
             ),
           ),
 
-          const Divider(color: _bgColor, height: 1, thickness: 1.5),
+          Divider(color: _bgColor, height: 1, thickness: 1.5),
 
           // Main Display Window
           AnimatedSize(
@@ -278,42 +361,51 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
           // Card Footer: Immutable Verification State
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               color: _bgColor,
-              borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(20)),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: Row(
-                    children: [
-                      const Icon(Icons.verified, size: 14, color: _accentGreen),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          'Practitioner: ${widget.log.doctor.name} (${widget.log.doctor.license})',
-                          style: TextStyle(
-                            fontFamily: 'Inter',
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.grey[700],
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Icon(Icons.verified, size: 14, color: _accentGreen),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Practitioner: ${widget.log.doctor.name} (${widget.log.doctor.license})',
+                              style: TextStyle(
+                                fontFamily: 'Inter',
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: isDark ? Colors.grey[400] : Colors.grey[700],
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                    Text(
+                      'ID: #${widget.log.logId.substring(0, 6)}',
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.grey[400] : Colors.grey[500],
+                      ),
+                    ),
+                  ],
                 ),
-                Text(
-                  'ID: #${widget.log.logId.substring(0, 6)}',
-                  style: TextStyle(
-                    fontFamily: 'Inter',
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey[500],
-                  ),
-                ),
+                const SizedBox(height: 8),
+                Divider(color: isDark ? Colors.grey[800] : Colors.grey[300], height: 1, thickness: 0.5),
+                const SizedBox(height: 8),
+                _buildSignatureBadge(isDark),
               ],
             ),
           ),
@@ -324,6 +416,7 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
 
   /// Custom animated sliding tab control.
   Widget _buildSlidingTabControl() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       height: 42,
       decoration: BoxDecoration(
@@ -345,13 +438,13 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                 width: tabWidth,
                 child: Container(
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: isDark ? Colors.grey[850] : Colors.white,
                     borderRadius: BorderRadius.circular(9),
-                    boxShadow: const [
+                    boxShadow: [
                       BoxShadow(
-                        color: Colors.black12,
+                        color: isDark ? Colors.black38 : Colors.black12,
                         blurRadius: 4,
-                        offset: Offset(0, 2),
+                        offset: const Offset(0, 2),
                       )
                     ],
                   ),
@@ -412,13 +505,14 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
   /// Renders raw doctor inputs, including clinical codes (ICD-10/SNOMED)
   /// and digital signature verification data.
   Widget _buildClinicalView() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // Verified Badge Banner
         Row(
           children: [
-            const Icon(Icons.shield_outlined, size: 16, color: _primaryGreen),
+            Icon(Icons.shield_outlined, size: 16, color: _primaryGreen),
             const SizedBox(width: 6),
             Text(
               'VERIFIED CLINICAL RECORD (UNALTERED)',
@@ -454,7 +548,7 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
         
         if (widget.log.clinical.notes.isNotEmpty) ...[
           const SizedBox(height: 16),
-          const Divider(color: _cardBorderColor, thickness: 0.5),
+          Divider(color: _cardBorderColor, thickness: 0.5),
           const SizedBox(height: 12),
           Text(
             'Clinical Notes',
@@ -462,13 +556,13 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
               fontFamily: 'Inter',
               fontSize: 11,
               fontWeight: FontWeight.bold,
-              color: Colors.grey[600],
+              color: isDark ? Colors.grey[400] : Colors.grey[600],
             ),
           ),
           const SizedBox(height: 4),
           Text(
             widget.log.clinical.notes,
-            style: const TextStyle(
+            style: TextStyle(
               fontFamily: 'Inter',
               fontSize: 13,
               color: _darkGrey,
@@ -482,13 +576,13 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).cardColor,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: _cardBorderColor.withOpacity(0.6)),
           ),
           child: Row(
             children: [
-              const Icon(Icons.fingerprint, size: 16, color: _accentGreen),
+              Icon(Icons.fingerprint, size: 16, color: _accentGreen),
               const SizedBox(width: 8),
               Expanded(
                 child: Column(
@@ -506,7 +600,7 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                     const SizedBox(height: 2),
                     Text(
                       widget.log.doctor.digitalSignature,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontFamily: 'Courier',
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
@@ -542,9 +636,9 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
             children: [
               Row(
                 children: [
-                  const Icon(Icons.auto_awesome_outlined, size: 16, color: _primaryGreen),
+                  Icon(Icons.auto_awesome_outlined, size: 16, color: _primaryGreen),
                   const SizedBox(width: 8),
-                  const Expanded(
+                  Expanded(
                     child: Text(
                       'AI TRANSLATION DISCLAIMER / වියාචනය / பொறுப்புத் துறப்பு',
                       style: TextStyle(
@@ -558,17 +652,17 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                 ],
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 '• EN: Simplified summaries are automatically generated for reference only. The doctor\'s original clinical record remains primary.',
                 style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: _primaryGreen, height: 1.3),
               ),
               const SizedBox(height: 4),
-              const Text(
+              Text(
                 '• SI: මෙම සරල කළ සාරාංශ යොමු කිරීම සඳහා පමණක් ස්වයංක්‍රීයව ජනනය කෙරේ. වෛද්‍යවරයාගේ මුල් සායනික වාර්තාව ප්‍රධාන වේ.',
                 style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: _primaryGreen, height: 1.3),
               ),
               const SizedBox(height: 4),
-              const Text(
+              Text(
                 '• TA: இந்த எளிமைப்படுத்தப்பட்ட சுருக்கங்கள் குறிப்புக்காக மட்டுமே தானாகவே உருவாக்கப்படுகின்றன. மருத்துவரின் அசல் மருத்துவப் பதிவேடே முதன்மையானது.',
                 style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: _primaryGreen, height: 1.3),
               ),
@@ -615,8 +709,8 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
         Center(
           child: ActionChip(
             onPressed: () => _showJargonExplainer(context),
-            avatar: const Icon(Icons.lightbulb_outline_rounded, color: _primaryGreen, size: 16),
-            label: const Text(
+            avatar: Icon(Icons.lightbulb_outline_rounded, color: _primaryGreen, size: 16),
+            label: Text(
               'Explain Medical Jargon',
               style: TextStyle(
                 fontFamily: 'Inter',
@@ -628,7 +722,7 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
             backgroundColor: _accentGreen.withOpacity(0.12),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
-              side: const BorderSide(color: _accentGreen, width: 1),
+              side: BorderSide(color: _accentGreen, width: 1),
             ),
           ),
         ),
@@ -702,14 +796,15 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
       });
     }
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (context) => Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           color: _bgColor,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -722,15 +817,15 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.grey[400],
+                  color: isDark ? Colors.grey[700] : Colors.grey[400],
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
             ),
             Row(
-              children: const [
+              children: [
                 Icon(Icons.auto_awesome_rounded, color: _primaryGreen, size: 24),
-                SizedBox(width: 8),
+                const SizedBox(width: 8),
                 Text(
                   'AI Medical Jargon Explainer',
                   style: TextStyle(
@@ -745,7 +840,7 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
             const SizedBox(height: 8),
             Text(
               'Simplifying clinical diagnoses and drug descriptions in English, සිංහල, & தமிழ்.',
-              style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: Colors.grey[600]),
+              style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: isDark ? Colors.grey[400] : Colors.grey[600]),
             ),
             const SizedBox(height: 24),
             
@@ -758,9 +853,9 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                       margin: const EdgeInsets.only(bottom: 16),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),
-                        side: const BorderSide(color: _cardBorderColor),
+                        side: BorderSide(color: _cardBorderColor),
                       ),
-                      color: Colors.white,
+                      color: Theme.of(context).cardColor,
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Column(
@@ -774,7 +869,7 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                               ),
                               child: Text(
                                 jargon['term']!,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontFamily: 'Inter',
                                   fontSize: 13,
                                   fontWeight: FontWeight.bold,
@@ -785,33 +880,33 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                             const SizedBox(height: 12),
                             Text(
                               jargon['en']!,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontFamily: 'Inter',
                                 fontSize: 14,
                                 color: _darkGrey,
                                 height: 1.4,
                               ),
                             ),
-                            const Divider(color: _bgColor, height: 16),
+                            Divider(color: _bgColor, height: 16),
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: Colors.grey[200],
+                                    color: isDark ? Colors.grey[900] : Colors.grey[200],
                                     borderRadius: BorderRadius.circular(4),
                                   ),
-                                  child: const Text(
+                                  child: Text(
                                     'සිංහල',
-                                    style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.grey),
+                                    style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: isDark ? Colors.grey[400] : Colors.grey),
                                   ),
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
                                     jargon['si']!,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontFamily: 'Inter',
                                       fontSize: 14,
                                       color: _darkGrey,
@@ -821,26 +916,26 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                                 ),
                               ],
                             ),
-                            const Divider(color: _bgColor, height: 16),
+                            Divider(color: _bgColor, height: 16),
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: Colors.grey[200],
+                                    color: isDark ? Colors.grey[900] : Colors.grey[200],
                                     borderRadius: BorderRadius.circular(4),
                                   ),
-                                  child: const Text(
+                                  child: Text(
                                     'தமிழ்',
-                                    style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.grey),
+                                    style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: isDark ? Colors.grey[400] : Colors.grey),
                                   ),
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
                                     jargon['ta']!,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontFamily: 'Inter',
                                       fontSize: 14,
                                       color: _darkGrey,
@@ -872,7 +967,7 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.warning_amber_rounded, size: 16, color: Colors.amber[900]),
+                      Icon(Icons.warning_amber_rounded, size: 16, color: isDark ? Colors.amber[300] : Colors.amber[900]),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
@@ -881,7 +976,7 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                             fontFamily: 'Inter',
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
-                            color: Colors.amber[950],
+                            color: isDark ? Colors.amber[200] : Colors.amber[950],
                           ),
                         ),
                       ),
@@ -890,17 +985,17 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                   const SizedBox(height: 8),
                   Text(
                     '• EN: AI definitions are for general informational reference only. They do not replace professional medical advice or clinical diagnoses.',
-                    style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: Colors.amber[950], height: 1.3),
+                    style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: isDark ? Colors.amber[200] : Colors.amber[950], height: 1.3),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     '• SI: මෙම නිර්වචන සාමාන්‍ය තොරතුරු සඳහා පමණි. ඒවා වෘත්තීය වෛද්‍ය උපදෙස් හෝ රෝග විනිශ්චය සඳහා ආදේශකයක් නොවේ.',
-                    style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: Colors.amber[950], height: 1.3),
+                    style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: isDark ? Colors.amber[200] : Colors.amber[950], height: 1.3),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     '• TA: இந்த வரையறைகள் பொதுவான தகவல் குறிப்புக்காக மட்டுமே. இவை தொழில்முறை மருத்துவ ஆலோசனை அல்லது மருத்துவ நோயறிதலுக்கு மாற்றாகாது.',
-                    style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: Colors.amber[950], height: 1.3),
+                    style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: isDark ? Colors.amber[200] : Colors.amber[950], height: 1.3),
                   ),
                 ],
               ),
@@ -929,6 +1024,7 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
     required IconData icon,
     String? extraText,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -944,24 +1040,24 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                   fontFamily: 'Inter',
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
-                  color: Colors.grey[600],
+                  color: isDark ? Colors.grey[400] : Colors.grey[600],
                 ),
               ),
               const SizedBox(height: 4),
               Text(
                 value,
-                style: const TextStyle(
+                style: TextStyle(
                   fontFamily: 'Inter',
                   fontSize: 15,
                   fontWeight: FontWeight.bold,
-                  color: Colors.black87,
+                  color: isDark ? Colors.white70 : Colors.black87,
                 ),
               ),
               if (extraText != null) ...[
                 const SizedBox(height: 2),
                 Text(
                   extraText,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontFamily: 'Inter',
                     fontSize: 13,
                     color: _darkGrey,
@@ -974,7 +1070,7 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: Colors.grey[200],
+                    color: isDark ? Colors.grey[900] : Colors.grey[200],
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
@@ -983,7 +1079,7 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                       fontFamily: 'Courier',
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
-                      color: Colors.grey[700],
+                      color: isDark ? Colors.grey[400] : Colors.grey[700],
                     ),
                   ),
                 ),
@@ -1004,10 +1100,11 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
     required String tamilValue,
     required IconData icon,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: _cardBorderColor.withOpacity(0.5)),
       ),
@@ -1037,18 +1134,18 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
           // English (Original)
           Text(
             englishValue,
-            style: const TextStyle(
+            style: TextStyle(
               fontFamily: 'Inter',
               fontSize: 16,
               fontWeight: FontWeight.bold,
-              color: Colors.black87,
+              color: isDark ? Colors.white70 : Colors.black87,
             ),
           ),
           const SizedBox(height: 8),
           
           // Sinhala Translation (සිංහල)
           if (sinhalaValue.isNotEmpty) ...[
-            const Divider(color: _bgColor, height: 12),
+            Divider(color: _bgColor, height: 12),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1059,7 +1156,7 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                     color: _primaryGreen.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(4),
                   ),
-                  child: const Text(
+                  child: Text(
                     'සිංහල',
                     style: TextStyle(
                       fontFamily: 'Inter',
@@ -1073,7 +1170,7 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                 Expanded(
                   child: Text(
                     sinhalaValue,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontFamily: 'Inter',
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
@@ -1088,7 +1185,7 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
           
           // Tamil Translation (தமிழ்)
           if (tamilValue.isNotEmpty) ...[
-            const Divider(color: _bgColor, height: 12),
+            Divider(color: _bgColor, height: 12),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1099,7 +1196,7 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                     color: _primaryGreen.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(4),
                   ),
-                  child: const Text(
+                  child: Text(
                     'தமிழ்',
                     style: TextStyle(
                       fontFamily: 'Inter',
@@ -1113,7 +1210,7 @@ class _MedicalTimelineCardState extends State<MedicalTimelineCard> with SingleTi
                 Expanded(
                   child: Text(
                     tamilValue,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontFamily: 'Inter',
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
