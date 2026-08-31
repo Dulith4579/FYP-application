@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
+import '../services/encryption_service.dart';
+import '../services/firebase_phr_service.dart';
 
 /// A native Material 3 modal bottom sheet that facilitates real-time
 /// doctor-patient session authorization.
@@ -17,6 +19,7 @@ import 'package:firebase_core/firebase_core.dart';
 class PatientAuthBottomSheet extends StatefulWidget {
   final String currentSessionId;
   final String patientId;
+  final String patientName;
   final String doctorName;
   final String licenseNumber;
 
@@ -24,6 +27,7 @@ class PatientAuthBottomSheet extends StatefulWidget {
     super.key,
     required this.currentSessionId,
     this.patientId = 'patient_014172',
+    this.patientName = 'Dulith Chandira',
     this.doctorName = 'Dr. Ruwan Gunawardena',
     this.licenseNumber = 'SLMC-8829',
   });
@@ -33,6 +37,7 @@ class PatientAuthBottomSheet extends StatefulWidget {
     required BuildContext context,
     required String sessionId,
     String patientId = 'patient_014172',
+    String patientName = 'Dulith Chandira',
   }) {
     return showModalBottomSheet(
       context: context,
@@ -46,6 +51,7 @@ class PatientAuthBottomSheet extends StatefulWidget {
         child: PatientAuthBottomSheet(
           currentSessionId: sessionId,
           patientId: patientId,
+          patientName: patientName,
         ),
       ),
     );
@@ -60,11 +66,11 @@ class _PatientAuthBottomSheetState extends State<PatientAuthBottomSheet> {
   String _selectedAccessLevel = 'Full Longitudinal History Access';
   bool _isLoading = false;
 
-  // Colors mapping the Clinical Green Palette
-  static const Color _primaryGreen = Color(0xFF1B5E20); // Deep Forest Green
-  static const Color _accentGreen = Color(0xFF4CAF50);  // Mint Green
-  static const Color _bgColor = Color(0xFFF5F7F5);      // Clean Light Slate/Grey
-  static const Color _cardBorderColor = Color(0xFFE0E5E0);
+  // Colors mapping the Clinical Green Palette (dynamic for dark mode compatibility)
+  Color get _primaryGreen => Theme.of(context).brightness == Brightness.dark ? const Color(0xFF81C784) : const Color(0xFF1B5E20);
+  Color get _accentGreen => const Color(0xFF4CAF50);
+  Color get _bgColor => Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E1E1E) : const Color(0xFFF5F7F5);
+  Color get _cardBorderColor => Theme.of(context).brightness == Brightness.dark ? const Color(0xFF2E7D32) : const Color(0xFFE0E5E0);
 
   /// Grants access by updating the Firestore session document.
   /// 
@@ -116,6 +122,21 @@ class _PatientAuthBottomSheetState extends State<PatientAuthBottomSheet> {
           .collection('sessions')
           .doc(widget.currentSessionId);
 
+      final docSnap = await sessionRef.get();
+      final doctorUid = docSnap.data()?['doctorUid'] ?? '';
+      
+      String pubKey = '';
+      if (doctorUid.isNotEmpty) {
+        final docUser = await FirebaseFirestore.instance.collection('users').doc(doctorUid).get();
+        pubKey = docUser.data()?['publicKey'] ?? '';
+      }
+
+      final activeKeyBase64 = EncryptionService.getActiveKeyBase64();
+      String encryptedAesKey = '';
+      if (pubKey.isNotEmpty) {
+        encryptedAesKey = EncryptionService.encryptAesKeyWithDoctorPublicKey(activeKeyBase64, pubKey);
+      }
+
       // --- FIRESTORE WRITE SCHEMATIC FOR THESIS SNAPSHOT ROUTING ---
       // This document update triggers a server-side state change which is instantly
       // broadcast to the subscribing client (the clinician terminal) listening on
@@ -123,10 +144,22 @@ class _PatientAuthBottomSheetState extends State<PatientAuthBottomSheet> {
       await sessionRef.set({
         'status': 'authorized',
         'patientId': widget.patientId,
+        'patientName': widget.patientName,
         'accessLevel': _selectedAccessLevel,
+        'encryptedAesKey': encryptedAesKey,
         'expiresAt': DateTime.now().add(const Duration(minutes: 15)),
         'authorizedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
+
+      // Append access audit receipt
+      await FirebasePhrService.instance.logAudit(
+        actorId: widget.patientId,
+        actorRole: 'patient',
+        action: 'AUTHORIZED_SESSION',
+        details: 'Authorized secure link with Dr. ${widget.doctorName} (License: ${widget.licenseNumber}) and exchanged encrypted AES session key.',
+        patientId: widget.patientId,
+        sessionId: widget.currentSessionId,
+      );
 
       if (mounted) {
         // Show success animation or visual indicator
@@ -184,18 +217,18 @@ class _PatientAuthBottomSheetState extends State<PatientAuthBottomSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         color: _bgColor,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black12,
+            color: isDark ? Colors.black38 : Colors.black12,
             blurRadius: 20,
             spreadRadius: 1,
-            offset: Offset(0, -5),
+            offset: const Offset(0, -5),
           )
         ],
       ),
@@ -213,7 +246,7 @@ class _PatientAuthBottomSheetState extends State<PatientAuthBottomSheet> {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: Colors.grey[400],
+                    color: isDark ? Colors.grey[700] : Colors.grey[400],
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -233,14 +266,14 @@ class _PatientAuthBottomSheetState extends State<PatientAuthBottomSheet> {
                             color: _primaryGreen.withOpacity(0.1),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(
+                          child: Icon(
                             Icons.qr_code_scanner_rounded,
                             color: _primaryGreen,
                             size: 28,
                           ),
                         ),
                         const SizedBox(width: 12),
-                        const Text(
+                        Text(
                           'Secure Diagnostic Link',
                           style: TextStyle(
                             fontFamily: 'Outfit',
@@ -257,7 +290,7 @@ class _PatientAuthBottomSheetState extends State<PatientAuthBottomSheet> {
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: Theme.of(context).cardColor,
                         border: Border.all(color: _cardBorderColor, width: 1),
                         borderRadius: BorderRadius.circular(16),
                       ),
@@ -282,11 +315,11 @@ class _PatientAuthBottomSheetState extends State<PatientAuthBottomSheet> {
                               children: [
                                 Text(
                                   widget.doctorName,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontFamily: 'Inter',
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold,
-                                    color: Colors.black87,
+                                    color: isDark ? Colors.white70 : Colors.black87,
                                   ),
                                 ),
                                 const SizedBox(height: 4),
@@ -301,7 +334,7 @@ class _PatientAuthBottomSheetState extends State<PatientAuthBottomSheet> {
                                         color: _accentGreen.withOpacity(0.15),
                                         borderRadius: BorderRadius.circular(6),
                                       ),
-                                      child: const Text(
+                                      child: Text(
                                         'Verified Practitioner',
                                         style: TextStyle(
                                           fontFamily: 'Inter',
@@ -317,7 +350,7 @@ class _PatientAuthBottomSheetState extends State<PatientAuthBottomSheet> {
                                       style: TextStyle(
                                         fontFamily: 'Inter',
                                         fontSize: 13,
-                                        color: Colors.grey[600],
+                                        color: isDark ? Colors.grey[400] : Colors.grey[600],
                                         fontWeight: FontWeight.w500,
                                       ),
                                     ),
@@ -347,7 +380,7 @@ class _PatientAuthBottomSheetState extends State<PatientAuthBottomSheet> {
                         fontSize: 11,
                         fontWeight: FontWeight.w800,
                         letterSpacing: 1.2,
-                        color: Colors.grey[600],
+                        color: isDark ? Colors.grey[400] : Colors.grey[600],
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -410,7 +443,7 @@ class _PatientAuthBottomSheetState extends State<PatientAuthBottomSheet> {
                     TextButton(
                       onPressed: _isLoading ? null : () => Navigator.pop(context),
                       style: TextButton.styleFrom(
-                        foregroundColor: Colors.grey[700],
+                        foregroundColor: isDark ? Colors.grey[400] : Colors.grey[700],
                         padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
                       child: const Text(
@@ -440,6 +473,7 @@ class _PatientAuthBottomSheetState extends State<PatientAuthBottomSheet> {
     required IconData icon,
   }) {
     final isSelected = _selectedAccessLevel == value;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return InkWell(
       onTap: () {
@@ -452,7 +486,7 @@ class _PatientAuthBottomSheetState extends State<PatientAuthBottomSheet> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.white : Colors.transparent,
+          color: isSelected ? Theme.of(context).cardColor : Colors.transparent,
           border: Border.all(
             color: isSelected ? _accentGreen : _cardBorderColor,
             width: isSelected ? 2 : 1,
@@ -487,7 +521,7 @@ class _PatientAuthBottomSheetState extends State<PatientAuthBottomSheet> {
                       fontFamily: 'Inter',
                       fontSize: 15,
                       fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                      color: isSelected ? _primaryGreen : Colors.black87,
+                      color: isSelected ? _primaryGreen : (isDark ? Colors.white70 : Colors.black87),
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -496,7 +530,7 @@ class _PatientAuthBottomSheetState extends State<PatientAuthBottomSheet> {
                     style: TextStyle(
                       fontFamily: 'Inter',
                       fontSize: 12,
-                      color: Colors.grey[600],
+                      color: isDark ? Colors.grey[400] : Colors.grey[600],
                       height: 1.3,
                     ),
                   ),

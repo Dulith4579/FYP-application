@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import '../services/firebase_phr_service.dart';
 import '../widgets/medical_timeline_card.dart';
+import '../services/auth_service.dart';
+import '../services/local_cache_service.dart';
 
 /// Screen displaying the complete longitudinal Clinical History for the patient.
 ///
@@ -17,18 +19,17 @@ class PastRecordsScreen extends StatefulWidget {
 }
 
 class _PastRecordsScreenState extends State<PastRecordsScreen> {
-  final String _selectedPatientId = 'patient_014172';
 
-  // Theme Constants matching Clinical Green styling
-  static const Color _primaryGreen = Color(0xFF1B5E20);
-  static const Color _bgColor = Color(0xFFF5F7F5);
+  // Theme Constants matching Clinical Green styling (dynamic for dark mode)
+  Color get _primaryGreen => Theme.of(context).brightness == Brightness.dark ? const Color(0xFF81C784) : const Color(0xFF1B5E20);
+  Color get _bgColor => Theme.of(context).scaffoldBackgroundColor;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _bgColor,
       appBar: AppBar(
-        backgroundColor: _primaryGreen,
+        backgroundColor: Theme.of(context).brightness == Brightness.dark ? Theme.of(context).cardColor : _primaryGreen,
         elevation: 0,
         title: const Text(
           'Clinical History',
@@ -41,11 +42,33 @@ class _PastRecordsScreenState extends State<PastRecordsScreen> {
         ),
       ),
       body: SafeArea(
-        child: Firebase.apps.isEmpty
-            ? _buildMockRecordsList()
-            : _buildStreamRecordsList(),
+        child: ValueListenableBuilder<ActivePatientProfile?>(
+          valueListenable: AuthService.instance.activePatientNotifier,
+          builder: (context, activePatient, _) {
+            final patientId = activePatient?.id ?? 'patient_014172';
+            return Firebase.apps.isEmpty
+                ? _buildOfflineRecordsList(patientId)
+                : _buildStreamRecordsList(patientId);
+          },
+        ),
       ),
     );
+  }
+
+  /// Builds the offline list (loads cached logs or falls back to mock list).
+  Widget _buildOfflineRecordsList(String patientId) {
+    final cachedLogs = LocalCacheService.getCachedTimeline(patientId);
+    if (cachedLogs.isNotEmpty) {
+      return ListView.builder(
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.only(top: 8, bottom: 24),
+        itemCount: cachedLogs.length,
+        itemBuilder: (context, index) {
+          return MedicalTimelineCard(log: cachedLogs[index]);
+        },
+      );
+    }
+    return _buildMockRecordsList();
   }
 
   /// Builds the offline list of 3 pre-defined mock records.
@@ -142,15 +165,23 @@ class _PastRecordsScreenState extends State<PastRecordsScreen> {
   }
 
   /// Builds the real-time list driven by the Firestore stream.
-  Widget _buildStreamRecordsList() {
+  Widget _buildStreamRecordsList(String patientId) {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirebasePhrService.instance.getMedicalTimeline(_selectedPatientId),
+      stream: FirebasePhrService.instance.getMedicalTimeline(patientId),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
 
         final docs = snapshot.data?.docs;
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        
+        if (docs != null && docs.isNotEmpty) {
+          // Write to Hive offline-first local cache asynchronously
+          final rawLogs = docs.map((d) => d.data()).toList();
+          LocalCacheService.cacheTimeline(patientId, rawLogs);
+        }
+
         if (snapshot.hasError || docs == null || docs.isEmpty) {
           return Center(
             child: Padding(
@@ -158,7 +189,7 @@ class _PastRecordsScreenState extends State<PastRecordsScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.history_toggle_off_rounded, size: 64, color: Colors.grey[400]),
+                  Icon(Icons.history_toggle_off_rounded, size: 64, color: isDark ? Colors.grey[600] : Colors.grey[400]),
                   const SizedBox(height: 16),
                   Text(
                     'No Past Records Found',
@@ -166,7 +197,7 @@ class _PastRecordsScreenState extends State<PastRecordsScreen> {
                       fontFamily: 'Outfit',
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: Colors.grey[700],
+                      color: isDark ? Colors.grey[300] : Colors.grey[700],
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -176,7 +207,7 @@ class _PastRecordsScreenState extends State<PastRecordsScreen> {
                     style: TextStyle(
                       fontFamily: 'Inter',
                       fontSize: 13,
-                      color: Colors.grey[500],
+                      color: isDark ? Colors.grey[400] : Colors.grey[500],
                     ),
                   ),
                 ],

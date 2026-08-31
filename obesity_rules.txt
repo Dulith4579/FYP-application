@@ -1,0 +1,70 @@
+|--- BMI <= 29.96
+|   |--- BMI <= 24.92
+|   |   |--- BMI <= 18.48
+|   |   |   |--- class: Insufficient_Weight
+|   |   |--- BMI >  18.48
+|   |   |   |--- FAF <= 0.91
+|   |   |   |   |--- FAF <= 0.04
+|   |   |   |   |   |--- class: Normal_Weight
+|   |   |   |   |--- FAF >  0.04
+|   |   |   |   |   |--- class: Overweight_Level_I
+|   |   |   |--- FAF >  0.91
+|   |   |   |   |--- class: Normal_Weight
+|   |--- BMI >  24.92
+|   |   |--- BMI <= 26.92
+|   |   |   |--- Age <= 55.12
+|   |   |   |   |--- BMI <= 26.82
+|   |   |   |   |   |--- class: Overweight_Level_I
+|   |   |   |   |--- BMI >  26.82
+|   |   |   |   |   |--- class: Overweight_Level_I
+|   |   |   |--- Age >  55.12
+|   |   |   |   |--- class: Overweight_Level_II
+|   |   |--- BMI >  26.92
+|   |   |   |--- BMI <= 26.97
+|   |   |   |   |--- CH2O <= 1.39
+|   |   |   |   |   |--- class: Overweight_Level_I
+|   |   |   |   |--- CH2O >  1.39
+|   |   |   |   |   |--- class: Overweight_Level_II
+|   |   |   |--- BMI >  26.97
+|   |   |   |   |--- Gender <= 0.50
+|   |   |   |   |   |--- class: Overweight_Level_II
+|   |   |   |   |--- Gender >  0.50
+|   |   |   |   |   |--- class: Overweight_Level_II
+|--- BMI >  29.96
+|   |--- BMI <= 34.69
+|   |   |--- BMI <= 34.39
+|   |   |   |--- BMI <= 30.05
+|   |   |   |   |--- FAF <= 0.61
+|   |   |   |   |   |--- class: Obesity_Type_I
+|   |   |   |   |--- FAF >  0.61
+|   |   |   |   |   |--- class: Overweight_Level_II
+|   |   |   |--- BMI >  30.05
+|   |   |   |   |--- BMI <= 34.03
+|   |   |   |   |   |--- class: Obesity_Type_I
+|   |   |   |   |--- BMI >  34.03
+|   |   |   |   |   |--- class: Obesity_Type_I
+|   |   |--- BMI >  34.39
+|   |   |   |--- BMI <= 34.55
+|   |   |   |   |--- class: Obesity_Type_II
+|   |   |   |--- BMI >  34.55
+|   |   |   |   |--- CH2O <= 2.45
+|   |   |   |   |   |--- class: Obesity_Type_I
+|   |   |   |   |--- CH2O >  2.45
+|   |   |   |   |   |--- class: Obesity_Type_II
+|   |--- BMI >  34.69
+|   |   |--- Gender <= 0.50
+|   |   |   |--- CH2O <= 1.00
+|   |   |   |   |--- BMI <= 40.59
+|   |   |   |   |   |--- class: Obesity_Type_II
+|   |   |   |   |--- BMI >  40.59
+|   |   |   |   |   |--- class: Obesity_Type_III
+|   |   |   |--- CH2O >  1.00
+|   |   |   |   |--- class: Obesity_Type_III
+|   |   |--- Gender >  0.50
+|   |   |   |--- BMI <= 44.63
+|   |   |   |   |--- BMI <= 35.19
+|   |   |   |   |   |--- class: Obesity_Type_II
+|   |   |   |   |--- BMI >  35.19
+|   |   |   |   |   |--- class: Obesity_Type_II
+|   |   |   |--- BMI >  44.63
+|   |   |   |   |--- class: Obesity_Type_III
